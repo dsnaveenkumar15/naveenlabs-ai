@@ -1,0 +1,63 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # No Traefik labels -- not reachable from outside this Docker network,
+    # only chat-api/n8n/flowise talk to it via the internal DNS name "ollama".
+
+  chat-api:
+    build: ./chat-api
+    environment:
+      - CHAT_MODEL=${CHAT_MODEL:-qwen2.5:1.5b}
+      - OLLAMA_URL=http://ollama:11434/api/chat
+    depends_on:
+      - ollama
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ai-chat.rule=Host(`${CHAT_DOMAIN:-ai.naveenlabs.tech}`)
+      - traefik.http.routers.ai-chat.entrypoints=websecure
+      - traefik.http.routers.ai-chat.tls.certresolver=letsencrypt
+      - traefik.http.services.ai-chat.loadbalancer.server.port=8000
+
+  n8n:
+    image: n8nio/n8n:latest
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD}
+      - N8N_HOST=${N8N_DOMAIN:-n8n.naveenlabs.tech}
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://${N8N_DOMAIN:-n8n.naveenlabs.tech}/
+      - GENERIC_TIMEZONE=Asia/Kolkata
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.n8n.rule=Host(`${N8N_DOMAIN:-n8n.naveenlabs.tech}`)
+      - traefik.http.routers.n8n.entrypoints=websecure
+      - traefik.http.routers.n8n.tls.certresolver=letsencrypt
+      - traefik.http.services.n8n.loadbalancer.server.port=5678
+
+  flowise:
+    image: flowiseai/flowise:latest
+    environment:
+      - FLOWISE_USERNAME=${FLOWISE_USER}
+      - FLOWISE_PASSWORD=${FLOWISE_PASSWORD}
+    volumes:
+      - flowise_data:/root/.flowise
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.flowise.rule=Host(`${FLOWISE_DOMAIN:-flowise.naveenlabs.tech}`)
+      - traefik.http.routers.flowise.entrypoints=websecure
+      - traefik.http.routers.flowise.tls.certresolver=letsencrypt
+      - traefik.http.services.flowise.loadbalancer.server.port=3000
+
+volumes:
+  ollama_data:
+  n8n_data:
+  flowise_data:
