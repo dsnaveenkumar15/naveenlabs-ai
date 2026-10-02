@@ -8,7 +8,7 @@ tools (n8n, Flowise).
 
 | Service | Domain | Access | What it is |
 |---|---|---|---|
-| chat-api (Comet) | `comet.naveenlabs.tech` | **public** | Static chat UI + thin rate-limited proxy to Ollama. Visitors can chat with a small local model, nothing else. |
+| chat-api (Chat) | `chat.naveenlabs.tech` | **public** | Static chat UI + thin rate-limited proxy to Ollama. Visitors can chat with a small local model, nothing else. |
 | ollama | (internal only) | none — no Traefik label, unreachable from outside the Docker network | Model runtime. Only `chat-api`/`n8n`/`flowise` can reach it, via `http://ollama:11434`. |
 | n8n | `127.0.0.1:5678` on the VPS (SSH tunnel) | **private**, Basic Auth | Workflow automation. Never expose without auth — nodes can execute arbitrary code/shell commands. |
 | flowise | `127.0.0.1:3000` on the VPS (SSH tunnel) | **private**, Basic Auth | Low-code LLM app/agent builder, points at the same local Ollama. |
@@ -44,7 +44,7 @@ docker compose up -d --build
 docker compose exec ollama ollama pull qwen2.5:1.5b
 ```
 
-Add a DNS A record for the `comet.` subdomain only (n8n and Flowise are other companies' product names and admin logins: never give them public hostnames; open them with `ssh -L 5678:127.0.0.1:5678 -L 3000:127.0.0.1:3000 root@VPS`) → VPS IP before
+Add a DNS A record for the `chat.` subdomain only (n8n and Flowise are other companies' product names and admin logins: never give them public hostnames; open them with `ssh -L 5678:127.0.0.1:5678 -L 3000:127.0.0.1:3000 root@VPS`) → VPS IP before
 starting (Traefik cert issuance needs them resolvable). See
 [[reference_vps_access]] for the existing Traefik setup this plugs into (no
 Traefik-side config changes needed, same pattern as the other 2 apps already
@@ -53,6 +53,6 @@ on that VPS).
 ## Landing page wiring (do after this is deployed and confirmed working)
 
 Add an entry to naveenlabs-home's `script.js` `galaxies.ai.planets` array
-pointing at `https://comet.naveenlabs.tech` — that's the first real planet in
+pointing at `https://chat.naveenlabs.tech` — that's the first real planet in
 the AI galaxy (currently empty/placeholder). Don't wire it before the chat
 page is actually live, or the planet links to a 404.

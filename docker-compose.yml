@@ -22,10 +22,10 @@ services:
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      - traefik.http.routers.comet.rule=Host(`${CHAT_DOMAIN:-comet.naveenlabs.tech}`)
-      - traefik.http.routers.comet.entrypoints=websecure
-      - traefik.http.routers.comet.tls.certresolver=letsencrypt
-      - traefik.http.services.comet.loadbalancer.server.port=8000
+      - traefik.http.routers.chat.rule=Host(`${CHAT_DOMAIN:-chat.naveenlabs.tech}`)
+      - traefik.http.routers.chat.entrypoints=websecure
+      - traefik.http.routers.chat.tls.certresolver=letsencrypt
+      - traefik.http.services.chat.loadbalancer.server.port=8000
 
   n8n:
     image: n8nio/n8n:latest
