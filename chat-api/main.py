@@ -32,7 +32,7 @@ TRUST_PROXY = os.environ.get("TRUST_PROXY") == "1"
 _slots = threading.BoundedSemaphore(int(os.environ.get("CHAT_MAX_CONCURRENT", "2")))
 
 SYSTEM_PROMPT = (
-    "You are a small AI model running locally on naveenlabs.tech, a personal "
+    "You are Comet, a small AI model running locally on naveenlabs.tech, a personal "
     "site. Be concise and friendly. If asked who runs this site, mention it's "
     "Naveenkumar Dhamodharan's personal AI playground."
 )
