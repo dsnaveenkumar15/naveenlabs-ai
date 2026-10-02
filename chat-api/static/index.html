@@ -4,34 +4,50 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Chat</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <meta name="description" content="A small open model running on this server. No account, nothing saved." />
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="preload" href="fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="style.css?v=2" />
 </head>
 <body>
-  <main class="chat-shell">
-    <header class="chat-header">
-      <a class="back-link" href="https://naveenlabs.tech">&larr; naveenlabs.tech</a>
-      <h1>Chat</h1>
-      <p class="chat-sub">A small local model, running on this server. No account, nothing saved.</p>
-    </header>
+  <header class="top">
+    <div class="top-inner">
+      <a class="wordmark" href="/">Chat</a>
+      <nav class="family" aria-label="naveenlabs AI tools">
+        <a href="https://trust.naveenlabs.tech">Trust</a>
+        <a href="https://radar.naveenlabs.tech">Radar</a>
+        <a href="https://blueprints.naveenlabs.tech">Blueprints</a>
+        <a href="https://naveenlabs.tech">naveenlabs.tech</a>
+      </nav>
+    </div>
+  </header>
 
-    <div class="chat-window" id="chat-window" aria-live="polite"></div>
+  <main class="chat-shell">
+    <h1>Talk to a small model</h1>
+    <p class="chat-sub">It runs on this server, not in someone else's cloud. No account, and nothing you type is saved.</p>
+
+    <div class="chat-window" id="chat-window" aria-live="polite">
+      <div class="starters" id="starters">
+        <p>Try one of these, or ask your own question.</p>
+        <button type="button" class="starter">What can you help me with?</button>
+        <button type="button" class="starter">Explain an AI agent in two sentences</button>
+        <button type="button" class="starter">Give me one useful Python tip</button>
+      </div>
+    </div>
 
     <form class="chat-form" id="chat-form">
-      <input
-        id="chat-input"
-        type="text"
-        placeholder="Ask something…"
-        maxlength="1000"
-        autocomplete="off"
-        required
-      />
+      <label class="visually-hidden" for="chat-input">Your message</label>
+      <input id="chat-input" type="text" placeholder="Ask something" maxlength="1000" autocomplete="off" required />
       <button type="submit" id="chat-send">Send</button>
     </form>
-    <p class="chat-note">Experimental demo of a small open model. Answers can be wrong; don't rely on them for medical, legal or financial decisions, and don't share personal information. Harmful requests are refused. Rate and daily limits apply. Independent personal project, not affiliated with any company.</p>
+    <p class="chat-note">Experimental demo of a small open model. Answers can be wrong; don't rely on them for medical, legal or financial decisions, and don't share personal information. Harmful requests are refused. Rate and daily limits apply.</p>
   </main>
 
-  <script src="chat.js"></script>
+  <footer class="foot">
+    <p class="foot-by">Chat is built and run by <a href="https://naveenlabs.tech">Naveenkumar Dhamodharan</a>, part of the naveenlabs AI galaxy.</p>
+    <p class="disclaimer">Independent personal project, not affiliated with or endorsed by any company. Provided as is.</p>
+  </footer>
+
+  <script src="chat.js?v=2"></script>
 </body>
 </html>
