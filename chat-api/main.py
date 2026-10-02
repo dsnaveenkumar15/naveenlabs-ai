@@ -9,6 +9,7 @@ personal site on a single container.
 # this ever needs to scale past one container.
 """
 import os
+import re
 import threading
 import time
 import json
@@ -30,15 +31,39 @@ MAX_REPLY_TOKENS = 300
 TRUST_PROXY = os.environ.get("TRUST_PROXY") == "1"
 # The model shares a small box with real apps: at most this many generations run at once, the rest are told to retry.
 _slots = threading.BoundedSemaphore(int(os.environ.get("CHAT_MAX_CONCURRENT", "2")))
+# Daily ceilings so the public demo can't be farmed: per visitor and for the whole site (UTC day).
+DAILY_PER_VISITOR = int(os.environ.get("CHAT_DAILY_PER_VISITOR", "50"))
+DAILY_TOTAL = int(os.environ.get("CHAT_DAILY_TOTAL", "1000"))
+
+REFUSAL = "I can't help with that. I'm a small demo model for friendly, everyday questions."
+SUPPORT = ("I'm sorry you're going through this. Please talk to someone now: in India call Tele-MANAS "
+           "on 14416 (free, 24x7), or your local emergency number. You don't have to face this alone.")
+_SELF_HARM = re.compile(r"(?i)\b(kill|hurt|harm)\s+(myself|me)\b|\bsuicid|\bself.?harm\b|\bend\s+my\s+life\b")
+# Topics this public demo refuses outright, checked on the question and on the reply.
+# ponytail: keyword screen, not a classifier; a small local model can't run a safety model alongside it.
+_BLOCKED = re.compile(r"""(?ix)
+    \b(pipe|nail|car|fertili[sz]er|homemade|make\s+a|build\s+a)\s*bombs?\b | \bexplosives?\b | \bdetonat
+  | \b(make|build|3d.?print)\w*\s+(a\s+)?(gun|firearm|silencer)\b | \bnerve\s+agent | \bsarin\b | \bricin\b | \banthrax\b
+  | \b(ransomware|keylogger|malware|botnet|rootkit|trojan|credential\s+stealer)\b | \bddos\b | \bsql\s*injection\s+payload
+  | \bphishing\b | \bscam\s+(email|message|script)\b | \bpretending\s+to\s+be\s+(my|a|the)\s+bank\b
+  | \b(kill|hurt|harm)\s+(myself|yourself|himself|herself)\b | \bsuicide\s+method | \bself.?harm\b
+  | \b(cook|synthesi[sz]e|make)\w*\s+(meth|cocaine|heroin|fentanyl|lsd)\b
+  | \b(child|minor|underage)\w*\s+(porn|sex|nude)\w* | \bcsam\b
+  | \b(porn|nsfw|explicit\s+sex)\w*
+""")
 
 SYSTEM_PROMPT = (
     "You are Comet, a small AI model running locally on naveenlabs.tech, a personal "
     "site. Be concise and friendly. If asked who runs this site, mention it's "
-    "Naveenkumar Dhamodharan's personal AI playground."
+    "Naveenkumar Dhamodharan's personal AI playground. "
+    "Politely refuse anything harmful, illegal, sexual, hateful or dangerous, and anything that "
+    "writes scams, spam or messages pretending to be a real company or person. Do not give "
+    "medical, legal or financial advice. Never claim to be made by, or speak for, any company."
 )
 
 app = FastAPI()
 _hits: dict[str, deque] = defaultdict(deque)
+_daily: dict[str, int] = {}        # "YYYY-MM-DD|ip" and "YYYY-MM-DD|*" -> count
 
 
 class ChatRequest(BaseModel):
@@ -64,10 +89,30 @@ def _rate_limited(ip: str) -> bool:
     return False
 
 
+def _over_daily_cap(ip: str) -> bool:
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    if any(not k.startswith(day) for k in _daily):
+        for k in [k for k in _daily if not k.startswith(day)]:
+            del _daily[k]
+    mine, total = f"{day}|{ip}", f"{day}|*"
+    if _daily.get(mine, 0) >= DAILY_PER_VISITOR or _daily.get(total, 0) >= DAILY_TOTAL:
+        return True
+    _daily[mine] = _daily.get(mine, 0) + 1
+    _daily[total] = _daily.get(total, 0) + 1
+    return False
+
+
 @app.post("/api/chat")
 def chat(req: ChatRequest, request: Request):
-    if _rate_limited(_client_ip(request)):
+    ip = _client_ip(request)
+    if _rate_limited(ip):
         raise HTTPException(429, "Too many requests, slow down.")
+    if _over_daily_cap(ip):
+        raise HTTPException(429, "Daily limit reached, come back tomorrow.")
+    if _SELF_HARM.search(req.message):
+        return {"reply": SUPPORT}
+    if _BLOCKED.search(req.message):
+        return {"reply": REFUSAL}
     if not _slots.acquire(blocking=False):
         raise HTTPException(503, "Busy, try again in a few seconds.", headers={"Retry-After": "5"})
 
@@ -93,7 +138,8 @@ def chat(req: ChatRequest, request: Request):
     finally:
         _slots.release()
 
-    return {"reply": data["message"]["content"]}
+    reply = data["message"]["content"]
+    return {"reply": REFUSAL if _BLOCKED.search(reply) else reply}
 
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
