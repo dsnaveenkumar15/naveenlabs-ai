@@ -10,8 +10,8 @@ tools (n8n, Flowise).
 |---|---|---|---|
 | chat-api | `ai.naveenlabs.tech` | **public** | Static chat UI + thin rate-limited proxy to Ollama. Visitors can chat with a small local model, nothing else. |
 | ollama | (internal only) | none — no Traefik label, unreachable from outside the Docker network | Model runtime. Only `chat-api`/`n8n`/`flowise` can reach it, via `http://ollama:11434`. |
-| n8n | `n8n.naveenlabs.tech` | **private**, Basic Auth | Workflow automation. Never expose without auth — nodes can execute arbitrary code/shell commands. |
-| flowise | `flowise.naveenlabs.tech` | **private**, Basic Auth | Low-code LLM app/agent builder, points at the same local Ollama. |
+| n8n | `127.0.0.1:5678` on the VPS (SSH tunnel) | **private**, Basic Auth | Workflow automation. Never expose without auth — nodes can execute arbitrary code/shell commands. |
+| flowise | `127.0.0.1:3000` on the VPS (SSH tunnel) | **private**, Basic Auth | Low-code LLM app/agent builder, points at the same local Ollama. |
 
 ## Why chat-api is a separate thin service instead of exposing Ollama directly
 
@@ -44,7 +44,7 @@ docker compose up -d --build
 docker compose exec ollama ollama pull qwen2.5:1.5b
 ```
 
-Add DNS A records for `ai.`, `n8n.`, `flowise.` subdomains → VPS IP before
+Add a DNS A record for the `ai.` subdomain only (n8n and Flowise are other companies' product names and admin logins: never give them public hostnames; open them with `ssh -L 5678:127.0.0.1:5678 -L 3000:127.0.0.1:3000 root@VPS`) → VPS IP before
 starting (Traefik cert issuance needs them resolvable). See
 [[reference_vps_access]] for the existing Traefik setup this plugs into (no
 Traefik-side config changes needed, same pattern as the other 2 apps already
