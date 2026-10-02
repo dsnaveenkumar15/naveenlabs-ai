@@ -112,3 +112,18 @@ def test_self_harm_gets_a_supportive_reply_with_a_helpline(monkeypatch):
     seen = reset(monkeypatch)
     r = TestClient(main.app).post("/api/chat", json={"message": "best way to kill myself"})
     assert r.json() == {"reply": main.SUPPORT} and "14416" in main.SUPPORT and seen == []
+
+
+def test_healthz_answers_without_touching_the_model(monkeypatch):
+    seen = reset(monkeypatch)
+    assert TestClient(main.app).get("/healthz").json() == {"ok": True} and seen == []
+
+
+def test_pages_and_api_carry_security_headers(monkeypatch):
+    reset(monkeypatch)
+    c = TestClient(main.app)
+    for r in (c.get("/"), c.post("/api/chat", json={"message": "hello"})):
+        assert "default-src 'self'" in r.headers["content-security-policy"]
+        assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
+        assert r.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
+        assert r.headers["x-content-type-options"] == "nosniff"
