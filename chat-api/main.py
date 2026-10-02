@@ -9,6 +9,7 @@ personal site on a single container.
 # this ever needs to scale past one container.
 """
 import os
+import threading
 import time
 import json
 import urllib.request
@@ -24,6 +25,11 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434/api/chat")
 RATE_LIMIT = 10          # requests
 RATE_WINDOW = 60         # seconds
 MAX_MESSAGE_LEN = 1000
+MAX_REPLY_TOKENS = 300
+# Behind Traefik the socket peer is the proxy, so the real visitor is the rightmost X-Forwarded-For entry.
+TRUST_PROXY = os.environ.get("TRUST_PROXY") == "1"
+# The model shares a small box with real apps: at most this many generations run at once, the rest are told to retry.
+_slots = threading.BoundedSemaphore(int(os.environ.get("CHAT_MAX_CONCURRENT", "2")))
 
 SYSTEM_PROMPT = (
     "You are a small AI model running locally on naveenlabs.tech, a personal "
@@ -39,6 +45,14 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_MESSAGE_LEN)
 
 
+def _client_ip(request: Request) -> str:
+    if TRUST_PROXY:
+        parts = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",") if part.strip()]
+        if parts:
+            return parts[-1]
+    return request.client.host if request.client else "unknown"
+
+
 def _rate_limited(ip: str) -> bool:
     now = time.time()
     hits = _hits[ip]
@@ -52,9 +66,10 @@ def _rate_limited(ip: str) -> bool:
 
 @app.post("/api/chat")
 def chat(req: ChatRequest, request: Request):
-    ip = request.client.host if request.client else "unknown"
-    if _rate_limited(ip):
+    if _rate_limited(_client_ip(request)):
         raise HTTPException(429, "Too many requests, slow down.")
+    if not _slots.acquire(blocking=False):
+        raise HTTPException(503, "Busy, try again in a few seconds.", headers={"Retry-After": "5"})
 
     payload = {
         "model": MODEL,
@@ -63,6 +78,7 @@ def chat(req: ChatRequest, request: Request):
             {"role": "user", "content": req.message},
         ],
         "stream": False,
+        "options": {"num_predict": MAX_REPLY_TOKENS},
     }
     http_req = urllib.request.Request(
         OLLAMA_URL,
@@ -74,6 +90,8 @@ def chat(req: ChatRequest, request: Request):
             data = json.loads(resp.read())
     except Exception as exc:
         raise HTTPException(503, "Model unavailable, try again shortly.") from exc
+    finally:
+        _slots.release()
 
     return {"reply": data["message"]["content"]}
 

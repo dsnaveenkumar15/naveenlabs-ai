@@ -15,6 +15,7 @@ services:
     build: ./chat-api
     environment:
       - CHAT_MODEL=${CHAT_MODEL:-qwen2.5:1.5b}
+      - TRUST_PROXY=1
       - OLLAMA_URL=http://ollama:11434/api/chat
     depends_on:
       - ollama
