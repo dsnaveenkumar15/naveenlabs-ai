@@ -31,6 +31,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+      start_interval: 2s     # check every 2 s while starting, so Traefik routes to it within seconds
     deploy:
       resources:
         limits:
