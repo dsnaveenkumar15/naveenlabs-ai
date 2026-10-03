@@ -1,58 +1,65 @@
 # naveenlabs-ai
 
-Self-hosted AI stack for the VPS: local models (Ollama), a public chat page
-(feeds the "AI galaxy" planet on naveenlabs.tech), and private automation
-tools (n8n, Flowise).
+Self-hosted AI stack on the VPS: a local model runtime (Ollama), the public **Chat** page
+(`https://chat.naveenlabs.tech`, the Chat planet on naveenlabs.tech), and private automation tools (n8n, Flowise).
+
+Status (2026-10-03): Chat and Ollama are deployed and healthy. n8n and Flowise are configured but not running.
+Shared architecture, security and operations: see `docs/ARCHITECTURE.md` in the `atlas` repository.
 
 ## Services
 
-| Service | Domain | Access | What it is |
+| Service | Address | Access | What it is |
 |---|---|---|---|
-| chat-api (Chat) | `chat.naveenlabs.tech` | **public** | Static chat UI + thin rate-limited proxy to Ollama. Visitors can chat with a small local model, nothing else. |
-| ollama | (internal only) | none — no Traefik label, unreachable from outside the Docker network | Model runtime. Only `chat-api`/`n8n`/`flowise` can reach it, via `http://ollama:11434`. |
-| n8n | `127.0.0.1:5678` on the VPS (SSH tunnel) | **private**, Basic Auth | Workflow automation. Never expose without auth — nodes can execute arbitrary code/shell commands. |
-| flowise | `127.0.0.1:3000` on the VPS (SSH tunnel) | **private**, Basic Auth | Low-code LLM app/agent builder, points at the same local Ollama. |
+| chat-api (Chat) | `chat.naveenlabs.tech` | public | Static chat page plus a thin, guarded API in front of the model |
+| ollama | internal only | none | Model runtime (`ollama/ollama:0.35.0`, capped at 4 GB). No Traefik route; only chat-api, n8n and Flowise reach it at `http://ollama:11434` |
+| n8n | `127.0.0.1:5678` (SSH tunnel) | private, Basic Auth | Workflow automation. Never public: its nodes can run shell commands |
+| flowise | `127.0.0.1:3000` (SSH tunnel) | private, Basic Auth | Low-code LLM app builder on the same Ollama |
 
-## Why chat-api is a separate thin service instead of exposing Ollama directly
+Open the private tools with `ssh -L 5678:127.0.0.1:5678 -L 3000:127.0.0.1:3000 root@VPS`. They must never get a
+public hostname (other products' names and admin logins; see the hosting-policy rules).
 
-Ollama's own API has no auth and no rate limiting — exposing it straight to
-the internet means anyone can hammer the model for free, unbounded. `chat-api`
-(FastAPI, `chat-api/main.py`) adds a per-IP in-memory rate limit (10 req/min)
-and a fixed system prompt, and is the only thing with a public Traefik label.
-# ponytail: in-memory limiter, not shared across replicas or restarts --
-# fine for one container on a personal site, revisit if this ever needs to
-# scale out.
+## Why Chat is a separate service instead of exposing Ollama
 
-## Local testing (done, works)
+Ollama's API has no authentication and no limits. `chat-api/main.py` is the only public piece and adds:
 
-`chat-api` was run locally against the laptop's existing Ollama instance
-(see [[completed_work_about_me_bot]] for how that got installed) before
-packaging into Docker — confirmed request/response and rate-limit-429 paths
-both work. n8n/Flowise weren't tested locally (Docker isn't installed on this
-laptop) — first real run will be on the VPS, which is the actual target
-environment anyway.
+- **Limits:** 10 requests per minute per visitor, 50 per visitor per day, 1,000 per day for the whole site
+  (`CHAT_DAILY_PER_VISITOR`, `CHAT_DAILY_TOTAL`), at most 2 generations at once (`CHAT_MAX_CONCURRENT`, others get
+  503 with `Retry-After`), replies capped at 300 tokens, questions at 1,000 characters.
+- **Guardrails:** a topic screen on the question and on the reply (weapons, malware, phishing and scams, drugs,
+  sexual content); self-harm questions get a supportive reply with the Tele-MANAS helpline (14416); a system prompt
+  that refuses harmful requests, gives no medical, legal or financial advice and never claims to speak for a company.
+  The screen is a keyword list, not a classifier; the system prompt is the second layer.
+- **Security headers** on every response: strict CSP, HSTS, `nosniff`, `frame-ancestors 'none'`, permissions policy.
+  API docs are turned off.
+- **Visitor identity behind the proxy:** the rightmost `X-Forwarded-For` entry (`TRUST_PROXY=1`).
+- **`/healthz`** for the Docker health check and the external uptime probe.
 
-## Deploy (VPS, not done yet — see reference_vps_access memory for the full checklist)
+The limiter and counters are in memory: one container on a personal site, so a restart resetting them is acceptable.
 
-```bash
-# on the VPS
-mkdir -p /opt/naveenlabs-ai && cd /opt/naveenlabs-ai
-# scp this whole repo here, or git clone if a remote gets set up later
-cp .env.example .env
-# edit .env: set real N8N_PASSWORD / FLOWISE_PASSWORD (not the placeholder)
-docker compose up -d --build
-docker compose exec ollama ollama pull qwen2.5:1.5b
+## Container hardening
+
+chat-api runs as a non-root user with a read-only filesystem, all Linux capabilities dropped,
+`no-new-privileges`, 0.5 CPU and 256 MB, and a health check. Python dependencies and the Ollama image are pinned.
+
+## Tests
+
+```powershell
+cd chat-api
+python -m pytest -q        # limits, guardrails, daily caps, self-harm reply, headers, health check
 ```
 
-Add a DNS A record for the `chat.` subdomain only (n8n and Flowise are other companies' product names and admin logins: never give them public hostnames; open them with `ssh -L 5678:127.0.0.1:5678 -L 3000:127.0.0.1:3000 root@VPS`) → VPS IP before
-starting (Traefik cert issuance needs them resolvable). See
-[[reference_vps_access]] for the existing Traefik setup this plugs into (no
-Traefik-side config changes needed, same pattern as the other 2 apps already
-on that VPS).
+## Deploy (VPS)
 
-## Landing page wiring (do after this is deployed and confirmed working)
+The repository has no git remote; it is copied to the server:
 
-Add an entry to naveenlabs-home's `script.js` `galaxies.ai.planets` array
-pointing at `https://chat.naveenlabs.tech` — that's the first real planet in
-the AI galaxy (currently empty/placeholder). Don't wire it before the chat
-page is actually live, or the planet links to a 404.
+```bash
+# from the laptop, in this directory
+tar --exclude=.git --exclude=.venv --exclude=__pycache__ --exclude=.pytest_cache -cf - . \
+  | ssh root@VPS "tar -xf - -C /opt/naveenlabs-ai"
+# on the VPS
+cd /opt/naveenlabs-ai && docker compose up -d --build ollama chat-api
+docker inspect -f '{{.State.Health.Status}}' naveenlabs-ai-chat-api-1      # wait for "healthy"
+docker compose exec ollama ollama pull qwen2.5:1.5b                         # first deploy only
+```
+
+DNS: an A record `chat` pointing at the VPS. Only `chat` is public.
