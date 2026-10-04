@@ -10,6 +10,7 @@ services:
       resources:
         limits:
           memory: 6g          # gemma3:4b (~3.6 GB loaded) + Radar's embedding model; still leaves the trading apps room
+          cpus: "3.0"         # of 4: a reply would otherwise take every core; one is always left for the trading apps
     # No Traefik labels -- not reachable from outside this Docker network,
     # only chat-api/n8n/flowise talk to it via the internal DNS name "ollama".
 

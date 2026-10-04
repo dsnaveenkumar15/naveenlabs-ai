@@ -39,7 +39,7 @@ def reset(monkeypatch, trust_proxy=False, slots=2):
 def test_reply_length_is_capped(monkeypatch):
     seen = reset(monkeypatch)
     r = TestClient(main.app).post("/api/chat", json={"message": "hello"})
-    assert r.status_code == 200 and r.json() == {"reply": "hi"} and seen[0]["options"] == {"num_predict": main.MAX_REPLY_TOKENS}
+    assert r.status_code == 200 and r.json() == {"reply": "hi"} and seen[0]["options"] == {"num_predict": main.MAX_REPLY_TOKENS, "num_thread": main.MODEL_THREADS}
 
 
 def test_rate_limit_is_per_visitor_behind_the_proxy(monkeypatch):

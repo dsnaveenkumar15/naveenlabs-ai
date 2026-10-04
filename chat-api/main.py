@@ -27,6 +27,8 @@ RATE_LIMIT = 10          # requests
 RATE_WINDOW = 60         # seconds
 MAX_MESSAGE_LEN = 1000
 MAX_REPLY_TOKENS = 300
+# Matches Ollama's CPU cap (docker-compose cpus: 3): more threads than cores only gets throttled.
+MODEL_THREADS = int(os.environ.get("CHAT_MODEL_THREADS", "3"))
 # Behind Traefik the socket peer is the proxy, so the real visitor is the rightmost X-Forwarded-For entry.
 TRUST_PROXY = os.environ.get("TRUST_PROXY") == "1"
 # The model shares a small box with real apps: at most this many generations run at once, the rest are told to retry.
@@ -176,7 +178,7 @@ def chat(req: ChatRequest, request: Request):
             {"role": "user", "content": req.message},
         ],
         "stream": False,
-        "options": {"num_predict": MAX_REPLY_TOKENS},
+        "options": {"num_predict": MAX_REPLY_TOKENS, "num_thread": MODEL_THREADS},
     }
     http_req = urllib.request.Request(
         OLLAMA_URL,
