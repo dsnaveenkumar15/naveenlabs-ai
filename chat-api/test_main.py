@@ -127,3 +127,18 @@ def test_pages_and_api_carry_security_headers(monkeypatch):
         assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
         assert r.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
         assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_the_model_is_given_the_site_facts_with_every_question(monkeypatch):
+    seen = reset(monkeypatch)
+    TestClient(main.app).post("/api/chat", json={"message": "What does Radar do?"})
+    system = seen[0]["messages"][0]["content"]
+    for fact in ("trust.naveenlabs.tech", "radar.naveenlabs.tech", "blueprints.naveenlabs.tech", "TradFi", "Web3",
+                 "answer only from these facts"):
+        assert fact in system, fact
+
+
+def test_the_facts_are_scoped_so_general_questions_are_still_answered(monkeypatch):
+    seen = reset(monkeypatch)
+    TestClient(main.app).post("/api/chat", json={"message": "What is the capital of Japan?"})
+    assert "For every other topic" in seen[0]["messages"][0]["content"]
