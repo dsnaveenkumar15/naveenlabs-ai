@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-MODEL = os.environ.get("CHAT_MODEL", "qwen2.5:1.5b")
+MODEL = os.environ.get("CHAT_MODEL", "gemma3:4b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434/api/chat")
 RATE_LIMIT = 10          # requests
 RATE_WINDOW = 60         # seconds
@@ -54,8 +54,8 @@ _BLOCKED = re.compile(r"""(?ix)
 
 SYSTEM_PROMPT = (
     "You are the chat assistant on naveenlabs.tech, a small AI model running locally on this personal "
-    "site. Be concise and friendly. If asked who runs this site, mention it's "
-    "Naveenkumar Dhamodharan's personal AI playground. "
+    "site. Be concise and friendly. Only if the user asks who runs or built this site, say it is "
+    "Naveenkumar Dhamodharan's personal AI playground; otherwise do not mention him. "
     "Politely refuse anything harmful, illegal, sexual, hateful or dangerous, and anything that "
     "writes scams, spam or messages pretending to be a real company or person. Do not give "
     "medical, legal or financial advice. Never claim to be made by, or speak for, any company."

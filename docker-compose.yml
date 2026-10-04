@@ -1,20 +1,22 @@
 services:
   ollama:
     image: ollama/ollama:0.35.0     # pinned: bump deliberately, then re-check the chat reply
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h      # keep the chat model loaded: no multi-second reload after a quiet spell
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          memory: 4g          # cannot crowd out the trading apps that share this box
+          memory: 6g          # gemma3:4b (~3.6 GB loaded) + Radar's embedding model; still leaves the trading apps room
     # No Traefik labels -- not reachable from outside this Docker network,
     # only chat-api/n8n/flowise talk to it via the internal DNS name "ollama".
 
   chat-api:
     build: ./chat-api
     environment:
-      - CHAT_MODEL=${CHAT_MODEL:-qwen2.5:1.5b}
+      - CHAT_MODEL=${CHAT_MODEL:-gemma3:4b}
       - TRUST_PROXY=1
       - OLLAMA_URL=http://ollama:11434/api/chat
     depends_on:

@@ -59,7 +59,7 @@ tar --exclude=.git --exclude=.venv --exclude=__pycache__ --exclude=.pytest_cache
 # on the VPS
 cd /opt/naveenlabs-ai && docker compose up -d --build ollama chat-api
 docker inspect -f '{{.State.Health.Status}}' naveenlabs-ai-chat-api-1      # wait for "healthy"
-docker compose exec ollama ollama pull qwen2.5:1.5b                         # first deploy only
+docker compose exec ollama ollama pull gemma3:4b                         # first deploy only
 ```
 
 DNS: an A record `chat` pointing at the VPS. Only `chat` is public.
