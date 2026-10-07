@@ -77,7 +77,9 @@ Facts about naveenlabs.tech:
   MCP/A2A protocols) with production reliability. Contact and links: naveenlabs.tech.
 - Trust (trust.naveenlabs.tech): a security checker for MCP servers (the plug-ins that give an AI agent tools). You
   paste a server's tool list and Trust shows what those tools could do on your machine before you install it, such as
-  hidden instructions, shell access and reading credential files. Nothing pasted is stored.
+  hidden instructions, shell access and reading credential files. Nothing pasted is stored. Its Red Team
+  (trust.naveenlabs.tech/redteam) goes further: an agent attacks the tools in a sandbox with known attack patterns,
+  shows what got through with a replay, and re-tests a suggested fix; results are private and deleted after seven days.
 - Radar (radar.naveenlabs.tech): follows releases of the libraries AI apps are built on, publishes a digest, and checks
   a dependency file (requirements.txt, package.json or a lock file) for breaking changes, deprecations and security
   advisories between your versions and the latest.

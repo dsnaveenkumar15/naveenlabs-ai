@@ -149,3 +149,10 @@ def test_the_site_facts_mention_the_architect_agent(monkeypatch):
     TestClient(main.app).post("/api/chat", json={"message": "what is the architect?"})
     system = seen[0]["messages"][0]["content"]
     assert "Architect" in system and "blueprints.naveenlabs.tech/architect" in system
+
+
+def test_the_site_facts_mention_the_red_team(monkeypatch):
+    seen = reset(monkeypatch)
+    TestClient(main.app).post("/api/chat", json={"message": "what is the red team?"})
+    system = seen[0]["messages"][0]["content"]
+    assert "Red Team" in system and "trust.naveenlabs.tech/redteam" in system
