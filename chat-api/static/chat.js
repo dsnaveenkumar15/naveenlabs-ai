@@ -24,6 +24,21 @@ function addMessage(text, cls) {
   return show(el);
 }
 
+// Three dots while the model answers; screen readers hear one short line instead.
+function addTyping() {
+  const el = document.createElement("div");
+  el.className = "msg msg-pending";
+  const dots = document.createElement("span");
+  dots.className = "typing";
+  dots.setAttribute("aria-hidden", "true");
+  for (let i = 0; i < 3; i++) dots.appendChild(document.createElement("i"));
+  const label = document.createElement("span");
+  label.className = "visually-hidden";
+  label.textContent = "Chat is typing";
+  el.append(dots, label);
+  return show(el);
+}
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const message = input.value.trim();
@@ -34,7 +49,7 @@ form.addEventListener("submit", async (e) => {
   input.value = "";
   input.disabled = true;
   sendBtn.disabled = true;
-  const pending = addMessage("Thinking…", "msg-pending");
+  const pending = addTyping();
 
   try {
     const res = await fetch("/api/chat", {

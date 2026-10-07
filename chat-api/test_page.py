@@ -155,3 +155,13 @@ def test_composer_stays_in_view():
 
 def test_long_words_wrap_inside_bubbles():
     assert "overflow-wrap: anywhere" in rule(".msg")
+
+
+def test_replies_are_rendered_as_text_only():
+    assert "innerHTML" not in JS and "insertAdjacentHTML" not in JS and "outerHTML" not in JS
+
+
+def test_typing_indicator_replaces_the_thinking_text():
+    assert "Thinking" not in JS and 'className = "typing"' in JS and "Chat is typing" in JS
+    motion = CSS.split(MOTION)[1]
+    assert ".typing i" in motion and "@keyframes" in motion

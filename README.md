@@ -18,6 +18,11 @@ Shared architecture, security and operations: see `docs/ARCHITECTURE.md` in the 
 Open the private tools with `ssh -L 5678:127.0.0.1:5678 -L 3000:127.0.0.1:3000 root@VPS`. They must never get a
 public hostname (other products' names and admin logins; see the hosting-policy rules).
 
+**Chat's look:** its own "soft conversational" theme in `chat-api/static/` (lavender, DM Sans, speech-bubble mark,
+soft filled icons in `icons.svg`), light by default with the shared light/dark toggle. One column: greeting, question
+cards by topic, the conversation, a pill composer that stays in view, a three-dot typing indicator.
+`chat-api/test_page.py` checks tokens, contrast, budgets and markup.
+
 ## Why Chat is a separate service instead of exposing Ollama
 
 Ollama's API has no authentication and no limits. `chat-api/main.py` is the only public piece and adds:
@@ -64,7 +69,7 @@ chat-api runs as a non-root user with a read-only filesystem, all Linux capabili
 
 ```powershell
 cd chat-api
-python -m pytest -q        # limits, guardrails, daily caps, self-harm reply, headers, health check
+python -m pytest -q        # limits, guardrails, daily caps, self-harm reply, headers, health check, page theme and markup
 ```
 
 ## Deploy (VPS)
