@@ -11,7 +11,7 @@ Shared architecture, security and operations: see `docs/ARCHITECTURE.md` in the 
 | Service | Address | Access | What it is |
 |---|---|---|---|
 | chat-api (Chat) | `chat.naveenlabs.tech` | public | Static chat page plus a thin, guarded API in front of the model |
-| ollama | internal only | none | Model runtime (`ollama/ollama:0.35.0`, capped at 3 of 4 CPU cores and 6 GB, model kept loaded for 24 h). No Traefik route; only chat-api, n8n, Flowise and Radar reach it at `http://ollama:11434` |
+| ollama | internal only | none | Model runtime (`ollama/ollama:0.35.0`, capped at 3 of 4 CPU cores and 6 GB, model never unloaded: a cold load can outlast chat-api's 60 s timeout). No Traefik route; only chat-api, n8n, Flowise and Radar reach it at `http://ollama:11434` |
 | n8n | `127.0.0.1:5678` (SSH tunnel) | private, Basic Auth | Workflow automation. Never public: its nodes can run shell commands |
 | flowise | `127.0.0.1:3000` (SSH tunnel) | private, Basic Auth | Low-code LLM app builder on the same Ollama |
 
@@ -84,6 +84,10 @@ tar --exclude=.git --exclude=.venv --exclude=__pycache__ --exclude=.pytest_cache
 cd /opt/naveenlabs-ai && docker compose up -d --build ollama chat-api
 docker inspect -f '{{.State.Health.Status}}' naveenlabs-ai-chat-api-1      # wait for "healthy"
 docker compose exec ollama ollama pull gemma3:4b                         # first deploy only
+docker compose exec ollama ollama run gemma3:4b "Say ok."                # after any ollama restart: load the model once
 ```
+
+The warm-up matters: a cold load can take longer than chat-api's 60 s timeout, and a timed-out request aborts the
+load, so without it every visitor gets "Model unavailable". `OLLAMA_KEEP_ALIVE=-1` then keeps the model loaded.
 
 DNS: an A record `chat` pointing at the VPS. Only `chat` is public.

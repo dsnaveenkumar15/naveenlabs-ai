@@ -2,7 +2,7 @@ services:
   ollama:
     image: ollama/ollama:0.35.0     # pinned: bump deliberately, then re-check the chat reply
     environment:
-      - OLLAMA_KEEP_ALIVE=24h      # keep the chat model loaded: no multi-second reload after a quiet spell
+      - OLLAMA_KEEP_ALIVE=-1       # never unload: a cold load (50-60+ s on CPU) can outlast chat-api's 60 s timeout, which aborts it
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
