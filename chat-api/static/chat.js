@@ -11,13 +11,17 @@ document.querySelectorAll(".starter").forEach((button) => {
   });
 });
 
+function show(el) {
+  windowEl.appendChild(el);
+  el.scrollIntoView({ block: "end" });        // scroll-margin keeps it above the composer
+  return el;
+}
+
 function addMessage(text, cls) {
   const el = document.createElement("div");
   el.className = `msg ${cls}`;
-  el.textContent = text;
-  windowEl.appendChild(el);
-  windowEl.scrollTop = windowEl.scrollHeight;
-  return el;
+  el.textContent = text;                       // replies are text, never markup
+  return show(el);
 }
 
 form.addEventListener("submit", async (e) => {

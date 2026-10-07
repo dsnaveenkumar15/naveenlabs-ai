@@ -12,9 +12,10 @@
   <link rel="stylesheet" href="style.css?v=5" />
 </head>
 <body>
+  <a class="skip visually-hidden" href="#chat-input">Skip to the message box</a>
   <header class="top">
     <div class="top-inner">
-      <a class="wordmark" href="/"><img src="icon.svg?v=2" alt="" width="22" height="22">Chat</a>
+      <a class="wordmark" href="/"><img src="icon.svg?v=2" alt="" width="24" height="24">Chat</a>
       <nav class="family" aria-label="naveenlabs AI tools">
         <a href="https://trust.naveenlabs.tech">Trust</a>
         <a href="https://radar.naveenlabs.tech">Radar</a>
@@ -26,31 +27,50 @@
   </header>
 
   <main class="chat-shell">
-    <h1>Talk to a small model</h1>
-    <p class="chat-sub">It runs on this server, not in someone else's cloud. No account, and nothing you type is saved.</p>
+    <section class="greeting">
+      <h1>Hi, what would you like to know?</h1>
+      <p>Ask about Trust, Radar and Blueprints, or anything else. I'm a small open model, so short, clear questions work best.</p>
+    </section>
 
-    <div class="chat-window" id="chat-window" aria-live="polite">
-      <div class="starters" id="starters">
-        <p>Try one of these, or ask your own question.</p>
-        <button type="button" class="starter">What can you help me with?</button>
-        <button type="button" class="starter">Explain an AI agent in two sentences</button>
-        <button type="button" class="starter">Give me one useful Python tip</button>
+    <section class="topics" id="starters" aria-label="Questions to start with">
+      <div class="topic topic-trust">
+        <h2><svg class="ic" aria-hidden="true"><use href="icons.svg#i-trust"/></svg>Trust</h2>
+        <button type="button" class="starter">What does Trust check before I install a tool?</button>
+        <button type="button" class="starter">Is anything I paste into Trust stored?</button>
       </div>
-    </div>
+      <div class="topic topic-radar">
+        <h2><svg class="ic" aria-hidden="true"><use href="icons.svg#i-radar"/></svg>Radar</h2>
+        <button type="button" class="starter">What does Radar follow?</button>
+        <button type="button" class="starter">Which files can Radar check for breaking changes?</button>
+      </div>
+      <div class="topic topic-blueprints">
+        <h2><svg class="ic" aria-hidden="true"><use href="icons.svg#i-blueprints"/></svg>Blueprints</h2>
+        <button type="button" class="starter">What is a blueprint on Blueprints?</button>
+        <button type="button" class="starter">Can I compare two blueprints?</button>
+      </div>
+      <div class="topic topic-about">
+        <h2><svg class="ic" aria-hidden="true"><use href="icons.svg#i-about"/></svg>About</h2>
+        <button type="button" class="starter">Who builds naveenlabs.tech?</button>
+        <button type="button" class="starter">What can you help me with?</button>
+      </div>
+    </section>
 
-    <form class="chat-form" id="chat-form">
+    <div class="conversation" id="chat-window" role="log" aria-live="polite"></div>
+
+    <form class="composer" id="chat-form">
       <label class="visually-hidden" for="chat-input">Your message</label>
       <input id="chat-input" type="text" placeholder="Ask something" maxlength="1000" autocomplete="off" required />
-      <button type="submit" id="chat-send">Send</button>
+      <button type="submit" id="chat-send" aria-label="Send"><svg aria-hidden="true"><use href="icons.svg#i-send"/></svg></button>
     </form>
     <p class="chat-note">Experimental demo of a small open model. Answers can be wrong; don't rely on them for medical, legal or financial decisions, and don't share personal information. Harmful requests are refused. Rate and daily limits apply.</p>
   </main>
 
   <footer class="foot">
+    <p class="foot-note">A small model running on our own server. It can be wrong; nothing you type is stored.</p>
     <p class="foot-by">Chat is built and run by <a href="https://naveenlabs.tech">Naveenkumar Dhamodharan</a>, part of the naveenlabs AI galaxy.</p>
     <p class="disclaimer">Independent personal project, not affiliated with or endorsed by any company. Provided as is.</p>
   </footer>
 
-  <script src="chat.js?v=3"></script>
+  <script src="chat.js?v=4"></script>
 </body>
 </html>

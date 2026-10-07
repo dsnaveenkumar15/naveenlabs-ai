@@ -115,3 +115,43 @@ def test_chat_opens_light_unless_the_visitor_chose():
     assert theme(default="light", cookie="theme=dark") == "dark"
     assert theme(default="light", store={"theme": "dark"}) == "dark"
     assert theme(system_dark=True) == "dark"            # no signature: the system setting, as before
+
+
+def test_home_is_one_column_greeting_topics_conversation_composer():
+    order = [HTML.index(s) for s in ('<h1', 'class="topics"', 'id="chat-window"', 'id="chat-form"')]
+    assert order == sorted(order)
+    topics = dict(re.findall(r'<div class="topic topic-(\w+)">(.*?)</div>', HTML, re.S))
+    assert list(topics) == ["trust", "radar", "blueprints", "about"]
+    assert all(body.count('class="starter"') >= 2 for body in topics.values())
+    assert 'role="log"' in HTML and 'aria-live="polite"' in HTML
+
+
+def test_every_icon_used_is_in_the_sprite_and_within_budget():
+    sprite = (STATIC / "icons.svg").read_text(encoding="utf-8")
+    used = set(re.findall(r'icons\.svg#([\w-]+)', HTML))
+    assert {"i-trust", "i-radar", "i-blueprints", "i-about", "i-send"} <= used
+    assert all(f'id="{icon}"' in sprite for icon in used)
+    assert (STATIC / "icons.svg").stat().st_size <= 15_000
+
+
+def test_send_button_has_a_name_and_the_input_a_label():
+    assert 'id="chat-send" aria-label="Send"' in HTML and '<label class="visually-hidden" for="chat-input">' in HTML
+
+
+def test_footer_note_is_honest_about_the_small_model():
+    foot = HTML[HTML.index("<footer"):]
+    assert "A small model running on our own server. It can be wrong; nothing you type is stored." in foot
+
+
+def rule(selector):
+    m = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", CSS)
+    assert m, f"missing rule {selector}"
+    return m.group(1)
+
+
+def test_composer_stays_in_view():
+    assert "position: sticky" in rule(".composer") and "bottom:" in rule(".composer")
+
+
+def test_long_words_wrap_inside_bubbles():
+    assert "overflow-wrap: anywhere" in rule(".msg")
