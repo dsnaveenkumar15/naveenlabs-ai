@@ -82,7 +82,9 @@ Facts about naveenlabs.tech:
   a dependency file (requirements.txt, package.json or a lock file) for breaking changes, deprecations and security
   advisories between your versions and the latest.
 - Blueprints (blueprints.naveenlabs.tech): reference architectures for AI agents, each checked by a linter, priced per
-  month and kept current; you can compare two or draft a custom one.
+  month and kept current; you can compare two or draft a custom one. Its Architect (blueprints.naveenlabs.tech/architect)
+  is an agent: you describe an AI system in plain words, it asks a few questions, drafts a design, checks it with the
+  linter, red-teams and prices it, in about three minutes; designs are private and deleted after seven days.
 - Chat (chat.naveenlabs.tech): you, a small open model running on the owner's own server, with rate limits and
   guardrails. No account, nothing saved.
 - TradFi: the owner's personal stock-trading system for his own brokerage account, through the broker's public API.

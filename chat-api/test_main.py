@@ -142,3 +142,10 @@ def test_the_facts_are_scoped_so_general_questions_are_still_answered(monkeypatc
     seen = reset(monkeypatch)
     TestClient(main.app).post("/api/chat", json={"message": "What is the capital of Japan?"})
     assert "For every other topic" in seen[0]["messages"][0]["content"]
+
+
+def test_the_site_facts_mention_the_architect_agent(monkeypatch):
+    seen = reset(monkeypatch)
+    TestClient(main.app).post("/api/chat", json={"message": "what is the architect?"})
+    system = seen[0]["messages"][0]["content"]
+    assert "Architect" in system and "blueprints.naveenlabs.tech/architect" in system
