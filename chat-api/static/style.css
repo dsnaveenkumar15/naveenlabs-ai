@@ -1,24 +1,23 @@
-/* Same product system as Trust, Radar and Blueprints; Chat's accent is slate. */
-@font-face {
-  font-family: "Instrument Sans";
-  src: url("fonts/instrument-sans-latin.woff2") format("woff2");
-  font-weight: 400 700; font-stretch: 75% 100%; font-display: swap;
-}
+/* Chat: soft conversational. Lavender, rounded bubbles with one tight corner, a pill composer that stays in view,
+   DM Sans. Opens light unless the visitor chose a mode (theme.js reads <html data-default-theme>). */
+@font-face { font-family: "DM Sans"; src: url("fonts/dm-sans-latin.woff2") format("woff2"); font-weight: 400 700; font-display: swap; }
 :root {
-  --bg: #FAFAFB; --surface: #FFFFFF; --surface-2: #F2F4F6; --ink: #151A21; --ink-2: #3C4550; --muted: #66707C;
-  --rule: rgba(21, 26, 33, 0.09); --rule-2: rgba(21, 26, 33, 0.16); --field: rgba(21, 26, 33, 0.22);
-  --accent: #4B5B70; --accent-soft: #ECEFF3; --bad: #C0262D;
-  --shadow-2: 0 1px 2px rgba(16, 24, 40, 0.05), 0 18px 40px -12px rgba(16, 24, 40, 0.18);
-  --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --wrap: 780px; --gutter: clamp(20px, 4vw, 48px);
+  --bg: #F5F1FF; --surface: #FFFFFF; --surface-2: #EFE9FD; --ink: #221C33; --ink-2: #463E5C; --muted: #6B6480;
+  --rule: rgba(34, 28, 51, 0.08); --rule-2: rgba(34, 28, 51, 0.14); --field: rgba(34, 28, 51, 0.22);
+  --accent: #6A4AE8; --accent-ink: #FFFFFF; --accent-soft: #E8E0FF; --bad: #B4232A; --bad-soft: #FCE9EB;
+  --shadow-1: 0 1px 2px rgba(34, 28, 51, 0.05), 0 6px 18px -8px rgba(60, 40, 140, 0.12);
+  --shadow-2: 0 2px 6px rgba(34, 28, 51, 0.06), 0 22px 48px -20px rgba(60, 40, 140, 0.30);
+  --sans: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --wrap: 760px; --gutter: clamp(16px, 4vw, 40px);
 }
-/* Dark theme (set by theme.js from the saved choice or the system setting). */
-  :root[data-theme="dark"] {
-    --bg: #0D1015; --surface: #151A21; --surface-2: #1B212A; --ink: #ECEFF3; --ink-2: #C3CAD3; --muted: #939DA9;
-    --rule: rgba(236, 239, 243, 0.09); --rule-2: rgba(236, 239, 243, 0.16); --field: rgba(236, 239, 243, 0.24);
-    --accent: #A9B8CB; --accent-soft: #232A34; --bad: #F2777C;
-    --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.4), 0 24px 48px -16px rgba(0, 0, 0, 0.6);
-  }* { box-sizing: border-box; }
+:root[data-theme="dark"] {
+  --bg: #14111D; --surface: #1E1A2B; --surface-2: #28223A; --ink: #ECE8F6; --ink-2: #CFC8E2; --muted: #A39CB8;
+  --rule: rgba(236, 232, 246, 0.08); --rule-2: rgba(236, 232, 246, 0.14); --field: rgba(236, 232, 246, 0.24);
+  --accent: #9F86FF; --accent-ink: #14111D; --accent-soft: #2E2650; --bad: #F2777C; --bad-soft: #3A1E27;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px -8px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.4), 0 24px 48px -18px rgba(0, 0, 0, 0.65);
+}
+* { box-sizing: border-box; }
 html { -webkit-font-smoothing: antialiased; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.6 var(--sans); min-height: 100vh; display: flex; flex-direction: column; }
 a { color: var(--ink); }
