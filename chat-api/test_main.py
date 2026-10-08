@@ -133,9 +133,16 @@ def test_the_model_is_given_the_site_facts_with_every_question(monkeypatch):
     seen = reset(monkeypatch)
     TestClient(main.app).post("/api/chat", json={"message": "What does Radar do?"})
     system = seen[0]["messages"][0]["content"]
-    for fact in ("trust.naveenlabs.tech", "radar.naveenlabs.tech", "blueprints.naveenlabs.tech", "TradFi", "Web3",
-                 "answer only from these facts"):
+    for fact in ("trust.naveenlabs.tech", "radar.naveenlabs.tech", "blueprints.naveenlabs.tech", "answer only from these facts"):
         assert fact in system, fact
+
+
+def test_the_private_trading_systems_are_never_mentioned_to_visitors(monkeypatch):
+    seen = reset(monkeypatch)
+    TestClient(main.app).post("/api/chat", json={"message": "Does the owner run any trading systems?"})
+    system = seen[0]["messages"][0]["content"].lower()
+    for word in ("tradfi", "web3", "stock-trading", "crypto-trading", "brokerage", "investment advice"):
+        assert word not in system, word
 
 
 def test_the_facts_are_scoped_so_general_questions_are_still_answered(monkeypatch):

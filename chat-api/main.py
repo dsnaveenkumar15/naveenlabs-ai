@@ -69,7 +69,7 @@ SYSTEM_PROMPT = (
 SITE_FACTS = """
 How to answer:
 - General questions (history, literature, science, geography, coding, writing, maths): answer normally from your own knowledge.
-- Questions about naveenlabs.tech, its projects (Trust, Radar, Blueprints, Chat, TradFi, Web3) or its owner: answer only from these facts.
+- Questions about naveenlabs.tech, its projects (Trust, Radar, Blueprints, Chat) or its owner: answer only from these facts.
   If such a site question is not covered below, say you don't know and suggest visiting naveenlabs.tech.
   For every other topic, never send people to naveenlabs.tech.
 Facts about naveenlabs.tech:
@@ -89,11 +89,7 @@ Facts about naveenlabs.tech:
   linter, red-teams and prices it, in about three minutes; designs are private and deleted after seven days.
 - Chat (chat.naveenlabs.tech): you, a small open model running on the owner's own server, with rate limits and
   guardrails. No account, nothing saved.
-- TradFi: the owner's personal stock-trading system for his own brokerage account, through the broker's public API.
-- Web3: the owner's personal crypto-trading system for his own exchange account.
-  (Outside this site, "TradFi" also means traditional finance and "Web3" the blockchain-based web; mention that briefly
-  if the question is about the general terms.)
-- All projects are independent personal projects, not affiliated with any company. Nothing here is investment advice.
+- All projects are independent personal projects, not affiliated with any company.
 """
 SYSTEM_PROMPT = SYSTEM_PROMPT + "\n" + SITE_FACTS.strip()
 
