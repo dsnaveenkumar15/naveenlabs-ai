@@ -3,8 +3,9 @@
 Self-hosted AI stack on the VPS: a local model runtime (Ollama), the public **Chat** page
 (`https://chat.naveenlabs.tech`, the Chat planet on naveenlabs.tech), and private automation tools (n8n, Flowise).
 
-Status (2026-10-03): Chat and Ollama are deployed and healthy. n8n and Flowise are configured but not running.
-Shared architecture, security and operations: see `docs/ARCHITECTURE.md` in the `atlas` repository.
+Status (2026-10-09): Chat and Ollama are deployed and healthy. n8n and Flowise are configured but not running.
+The whole server: `docs/ARCHITECTURE.md` in the `naveenlabs-ops` repository; the AI apps that share Ollama:
+`docs/ARCHITECTURE.md` in the `atlas` repository.
 
 ## Services
 
@@ -91,3 +92,37 @@ The warm-up matters: a cold load can take longer than chat-api's 60 s timeout, a
 load, so without it every visitor gets "Model unavailable". `OLLAMA_KEEP_ALIVE=-1` then keeps the model loaded.
 
 DNS: an A record `chat` pointing at the VPS. Only `chat` is public.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    visitor(["Visitor"]) --> traefik["Traefik<br/>TLS, Host: chat.naveenlabs.tech"]
+    traefik --> api["chat-api (FastAPI)"]
+    subgraph api_inside["chat-api, per question"]
+        direction TB
+        limits["rate limits, daily caps,<br/>2 at once"] --> screen["topic screen<br/>on the question"]
+        screen --> prompt["system prompt +<br/>SITE_FACTS"]
+        prompt --> reply_screen["topic screen<br/>on the reply"]
+    end
+    api --> api_inside
+    prompt --> ollama["ollama (internal only)<br/>gemma3:4b, 3 cores, 6 GB"]
+    radar["Radar /ask"] --> ollama
+```
+
+The browser loads the static page from chat-api and posts each question to `/api/chat`. Ollama has no route from
+outside the Docker network; chat-api is the only public piece and adds every limit and guardrail. Radar's `/ask`
+uses the same Ollama for embeddings (`nomic-embed-text`).
+
+## Completed work
+
+| Date | Work |
+|---|---|
+| 2026-09-25 | Stack defined: Ollama, chat-api, n8n, Flowise |
+| 2026-10-02 | n8n and Flowise private; per-visitor rate limit behind the proxy, concurrency and reply caps; guardrails (topic screen, self-harm helpline reply); Chat named and given its hostname |
+| 2026-10-03 | Shared product design with dark mode; hardened container (health endpoint, security headers, non-root, read-only); light/dark toggle shared across sites |
+| 2026-10-04 | Model benchmarked on the server and switched to gemma3:4b; answers about the site come from a fact sheet; Ollama capped at 3 cores and 6 GB |
+| 2026-10-07 | "Soft conversational" theme, one-column home with topic cards, typing indicator; model never unloaded (cold load outlasted the timeout); facts mention the Architect and Red Team |
+| 2026-10-08 | Facts no longer describe the private trading systems (a test forbids it) |
+
+Open item: this repository has no GitHub remote yet; it exists on the laptop and, as copied files, on the server.
