@@ -4,8 +4,6 @@ Self-hosted AI stack on the VPS: a local model runtime (Ollama), the public **Ch
 (`https://chat.naveenlabs.tech`, the Chat planet on naveenlabs.tech), and private automation tools (n8n, Flowise).
 
 Status (2026-10-09): Chat and Ollama are deployed and healthy. n8n and Flowise are configured but not running.
-The whole server: `docs/ARCHITECTURE.md` in the `naveenlabs-ops` repository; the AI apps that share Ollama:
-`docs/ARCHITECTURE.md` in the `atlas` repository.
 
 ## Services
 
