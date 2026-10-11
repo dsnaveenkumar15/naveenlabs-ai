@@ -73,7 +73,7 @@ python -m pytest -q        # limits, guardrails, daily caps, self-harm reply, he
 
 ## Deploy (VPS)
 
-The repository has no git remote; it is copied to the server:
+Source is on GitHub (private `dsnaveenkumar15/naveenlabs-ai`); the files are copied to the server:
 
 ```bash
 # from the laptop, in this directory
@@ -122,5 +122,4 @@ uses the same Ollama for embeddings (`nomic-embed-text`).
 | 2026-10-04 | Model benchmarked on the server and switched to gemma3:4b; answers about the site come from a fact sheet; Ollama capped at 3 cores and 6 GB |
 | 2026-10-07 | "Soft conversational" theme, one-column home with topic cards, typing indicator; model never unloaded (cold load outlasted the timeout); facts mention the Architect and Red Team |
 | 2026-10-08 | Facts no longer describe the private trading systems (a test forbids it) |
-
-Open item: this repository has no GitHub remote yet; it exists on the laptop and, as copied files, on the server.
+| 2026-10-11 | Pushed to a private GitHub repository |
