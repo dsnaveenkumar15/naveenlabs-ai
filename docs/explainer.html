@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>How Chat is built (3D deck)</title>
+<meta name="description" content="Engineering deck for Chat: a small open model on a shared CPU-only server, behind one thin API that limits, screens and grounds every question before the model runs." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%239F86FF'/%3E%3Cpath d='M9 10.5A3.5 3.5 0 0 1 12.5 7h7A3.5 3.5 0 0 1 23 10.5v5a3.5 3.5 0 0 1-3.5 3.5H15l-4.5 4v-4.2A3.5 3.5 0 0 1 9 15.5z' fill='%2314111D'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<style>
+  :root {
+    --accent: #9f86ff; --accent-soft: #c3b4ff; --amber: #e2ae4a; --amber-soft: #f0c878; --red-soft: #f2777c;
+    --blue-soft: #7fb3ff; --purple-soft: #c3b4ff; --orange-soft: #f0883e; --grey: #a39cb8;
+    --bg: #14111d; --panel: #1e1a2b; --panel-2: #28223a; --border: #3a3350;
+    --text: #ece8f6; --text-dim: #cfc8e2; --text-dimmer: #a39cb8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* Fluid scale: every rem grows with the screen, so a large display shows larger content instead of empty space */
+  html { font-size: clamp(14px, 0.5vw + 0.95vh, 22px); }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'IBM Plex Sans', system-ui, sans-serif; font-weight: 300; letter-spacing: 0.01em; overflow: hidden; }
+  body { display: flex; flex-direction: column; padding: 1.1rem 1.4rem; gap: 0.85rem; }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-bottom: 0.7rem; border-bottom: 1px solid var(--border); }
+  header .brand { display: flex; align-items: center; gap: 0.55rem; font-weight: 700; letter-spacing: -0.01em; font-size: 1.2rem; }
+  header .brand svg { width: 22px; height: 22px; }
+  header .brand .em, .em { color: var(--accent); }
+  header .subtitle { color: var(--text-dim); font-size: 0.78rem; }
+
+  main { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+  .slide { position: absolute; inset: 0; overflow-y: auto; padding-right: 6px; display: none; flex-direction: column; gap: 0.85rem; }
+  .slide.active { display: flex; animation: fade .3s ease; }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .slide.active { animation: none; } }
+  .slide::-webkit-scrollbar { width: 6px; }
+  .slide::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .slide-num { color: var(--text-dimmer); font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; letter-spacing: 0.06em; }
+  h1.slide-title { font-size: 1.6rem; font-weight: 600; letter-spacing: -0.015em; color: var(--text); }
+  .slide-lead { color: var(--text-dim); font-size: 0.9rem; line-height: 1.55; max-width: 82ch; }
+  .slide-lead strong { color: var(--text); font-weight: 500; }
+  code.k, .mono { font-family: 'IBM Plex Mono', monospace; }
+  code.k { color: var(--blue-soft); font-size: 0.92em; }
+
+  .card { background: linear-gradient(160deg, var(--panel) 0%, var(--panel-2) 100%); border: 1px solid var(--border); border-radius: 0.7rem; padding: 0.9rem 1.05rem; }
+  .card h3 { font-size: 0.8rem; color: var(--text); font-weight: 600; margin-bottom: 0.45rem; }
+  .card p, .card li { font-size: 0.85rem; line-height: 1.55; color: var(--text-dim); }
+  .card ul { padding-left: 1.1rem; }
+  .card p strong, .card li strong { color: var(--text); font-weight: 500; }
+  .card p + p { margin-top: 0.5rem; }
+  .card.green  { border-left: 3px solid var(--accent); }
+  .card.amber  { border-left: 3px solid var(--amber); }
+  .card.blue   { border-left: 3px solid var(--blue-soft); }
+  .card.red    { border-left: 3px solid var(--red-soft); }
+  .card.purple { border-left: 3px solid var(--purple-soft); }
+  .stack-col { display: flex; flex-direction: column; gap: 0.6rem; min-height: 0; }
+
+  .example { padding: 0.65rem 0.85rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 0.5rem; font-family: 'IBM Plex Mono', monospace; font-size: 0.76rem; color: var(--text-dim); line-height: 1.62; white-space: pre-wrap; overflow-x: auto; }
+  .example b { color: var(--amber-soft); font-weight: 500; }
+  .example .out { color: var(--accent); }
+  .example .bad { color: var(--red-soft); }
+  .example .c { color: var(--text-dimmer); }
+  .example .kw { color: var(--purple-soft); }
+  .example mark { background: rgba(248,81,73,0.18); color: var(--red-soft); padding: 0 2px; border-radius: 3px; }
+  .ex-title { font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; color: var(--text-dimmer); margin-bottom: 0.3rem; }
+
+  .canvas-wrap { background: linear-gradient(160deg, var(--panel) 0%, var(--panel-2) 100%); border: 1px solid var(--border); border-radius: 0.8rem; position: relative; overflow: hidden; min-height: 300px; }
+  .canvas-wrap canvas { display: block; width: 100% !important; height: 100% !important; }
+  .canvas-hint { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); background: rgba(14,15,12,0.88); color: var(--text-dim); font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; padding: 0.3rem 0.65rem; border-radius: 0.3rem; border: 1px solid var(--border); pointer-events: none; z-index: 5; white-space: nowrap; }
+  /* 3D labels are real HTML text, so they are as sharp as the page */
+  .labels3d { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+  /* name only; hover a label to read its detail line */
+  .lbl3d { transform: translateY(-50%); background: rgba(7,11,16,0.85); border: 1px solid var(--c); border-left: 2px solid var(--c);
+    border-radius: 3px; padding: 0 4px 1px; white-space: nowrap; line-height: 1.2; text-align: left; pointer-events: auto; cursor: default; }
+  .lbl3d b { display: block; font: 600 max(9px, 0.585rem) 'IBM Plex Sans', sans-serif; color: #fff; letter-spacing: 0; }
+  .lbl3d i { display: none; font: 400 max(9px, 0.51rem) 'IBM Plex Mono', monospace; font-style: normal; color: #c9d1d9; }
+  .lbl3d:hover { position: relative; z-index: 5; background: rgba(7,11,16,0.97); padding: 1px 6px 2px; }
+  .lbl3d:hover b { font-size: max(11px, 0.72rem); }
+  .lbl3d:hover i { display: block; font-size: max(10px, 0.62rem); }
+  .lbl3d.small b { font-size: max(9px, 0.54rem); }
+  @media (max-width: 900px) { .lbl3d b { font-size: 8px; } }
+  .side-extra { display: none; }
+  .facts-list { list-style: none; padding: 0; margin: 0.2rem 0 0; }
+  .facts-list li { padding: 0.4rem 0.7rem; border-left: 2px solid var(--border); background: rgba(255,255,255,0.02); border-radius: 0 0.4rem 0.4rem 0;
+    font-size: 0.84rem; line-height: 1.45; color: var(--text-dim); }
+  .facts-list li + li { margin-top: 0.35rem; }
+  .facts-list b { color: var(--text); font-weight: 600; margin-right: 0.35rem; }
+  .zoom3d { position: absolute; top: 10px; right: 10px; z-index: 6; display: flex; flex-direction: column; gap: 4px; }
+  .zoom3d button { min-width: 2rem; height: 2rem; padding: 0 0.4rem; background: rgba(14,15,12,0.88); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; font: 500 0.85rem 'IBM Plex Sans', sans-serif; cursor: pointer; }
+  .zoom3d button:hover { border-color: var(--accent); color: var(--accent); }
+  .zoom3d button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .legend3d { position: absolute; top: 10px; left: 12px; z-index: 6; display: flex; gap: 0.9rem; font-size: 0.8rem; color: var(--text); pointer-events: none; }
+  .legend3d span::before { content: ""; display: inline-block; width: 11px; height: 11px; border-radius: 2px; background: var(--c); margin-right: 6px; vertical-align: -1px; }
+  .canvas-wait { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-dimmer); font-size: 0.85rem; text-align: center; padding: 1rem; }
+  .canvas-wrap.ready .canvas-wait { display: none; }
+
+  .metric-table { display: flex; flex-direction: column; gap: 0.3rem; }
+  .metric-row { display: grid; grid-template-columns: var(--cols, 14rem 1fr 1fr 1fr); gap: 0.6rem; padding: 0.45rem 0.65rem; border-radius: 0.35rem; background: rgba(255,255,255,0.025); font-family: 'IBM Plex Mono', monospace; font-size: 0.77rem; align-items: center; color: var(--text-dim); }
+  .metric-row.head { background: none; color: var(--text-dimmer); font-family: 'IBM Plex Sans', sans-serif; font-size: 0.72rem; padding-bottom: 0.1rem; }
+  .metric-row .m { color: var(--text); font-family: 'IBM Plex Sans', sans-serif; font-size: 0.8rem; }
+  .metric-row .s { font-family: 'IBM Plex Sans', sans-serif; font-size: 0.8rem; line-height: 1.45; }
+  .metric-row .c { text-align: center; }
+  .metric-row .good { color: var(--accent); font-weight: 500; }
+  .metric-row .bad { color: var(--red-soft); }
+  .metric-row .warn { color: var(--amber-soft); }
+
+  .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.85rem; }
+  .card-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .split { flex: 1; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 1rem; min-height: 0; }
+  .split > .canvas-wrap { min-height: 340px; }
+
+  .walk { display: flex; flex-direction: column; gap: 0.55rem; }
+  .walk-step { display: grid; grid-template-columns: 2.2rem 1fr; gap: 0.8rem; align-items: start; padding: 0.7rem 0.95rem; background: linear-gradient(160deg, var(--panel), var(--panel-2)); border: 1px solid var(--border); border-radius: 0.6rem; border-left: 3px solid var(--accent); }
+  .walk-step .n { font-family: 'IBM Plex Mono', monospace; font-size: 1.25rem; font-weight: 500; color: var(--accent); line-height: 1; }
+  .walk-step .b { color: var(--text); font-weight: 500; font-size: 0.92rem; }
+  .walk-step .d { color: var(--text-dim); font-size: 0.83rem; line-height: 1.5; margin-top: 0.2rem; }
+  .walk-step.s2 { border-left-color: var(--blue-soft); } .walk-step.s2 .n { color: var(--blue-soft); }
+  .walk-step.s3 { border-left-color: var(--amber); } .walk-step.s3 .n { color: var(--amber-soft); }
+  .walk-step.s4 { border-left-color: var(--purple-soft); } .walk-step.s4 .n { color: var(--purple-soft); }
+
+  .title-slide { justify-content: center; align-items: center; text-align: center; gap: 0.7rem !important; }
+  .title-slide h1 { font-size: 3.4rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.05; color: var(--text); }
+  .title-slide .sub { font-size: 1.1rem; color: var(--text-dim); max-width: 760px; line-height: 1.55; }
+  .title-slide .facts { display: flex; gap: 2.2rem; margin-top: 1.2rem; flex-wrap: wrap; justify-content: center; }
+  .title-slide .facts div { text-align: center; }
+  .title-slide .facts b { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 1.6rem; font-weight: 500; color: var(--text); }
+  .title-slide .facts span { font-size: 0.78rem; color: var(--text-dimmer); }
+  .title-slide .live { margin-top: 1rem; font-size: 0.85rem; color: var(--text-dimmer); }
+  .title-slide .live a { color: var(--accent); }
+
+  .callout-big { padding: 1.1rem; background: linear-gradient(135deg, rgba(245,166,35,0.12) 0%, rgba(88,166,255,0.06) 100%); border: 1px solid rgba(245,166,35,0.35); border-radius: 0.7rem; text-align: center; }
+  .callout-big .big { font-family: 'IBM Plex Mono', monospace; font-size: 2.3rem; font-weight: 500; color: var(--accent); line-height: 1; letter-spacing: -0.02em; }
+  .callout-big .lbl { font-size: 0.8rem; color: var(--text-dim); margin-top: 0.4rem; }
+  .callout-big .desc { margin-top: 0.7rem; color: var(--text-dim); font-size: 0.84rem; line-height: 1.55; }
+  .callout-big.red { background: linear-gradient(135deg, rgba(248,81,73,0.12) 0%, rgba(210,153,34,0.06) 100%); border-color: rgba(248,81,73,0.35); }
+  .callout-big.red .big { color: var(--red-soft); }
+
+  .why { padding: 0.7rem 0.95rem; border-left: 3px solid var(--amber); background: rgba(210,153,34,0.08); border-radius: 0 0.5rem 0.5rem 0; font-size: 0.85rem; line-height: 1.55; color: var(--text-dim); }
+  .why strong { color: var(--amber-soft); font-weight: 600; margin-right: 0.35rem; }
+
+  .verdict { display: inline-block; font-family: 'IBM Plex Sans', sans-serif; font-size: 0.72rem; font-weight: 600; padding: 0.1rem 0.5rem; border-radius: 999px; margin-right: 0.4rem; }
+  .verdict.got { background: rgba(248,81,73,0.18); color: var(--red-soft); }
+  .verdict.ok { background: rgba(245,166,35,0.15); color: var(--accent); }
+
+  footer { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 1rem; background: linear-gradient(160deg, var(--panel) 0%, var(--panel-2) 100%); border: 1px solid var(--border); border-radius: 0.65rem; gap: 1rem; }
+  .nav-left, .nav-right, .nav-center { display: flex; align-items: center; gap: 0.7rem; }
+  .btn { background: rgba(88,166,255,0.1); color: var(--text); border: 1px solid rgba(88,166,255,0.35); padding: 0.45rem 0.9rem; border-radius: 0.4rem; font-family: 'IBM Plex Sans', sans-serif; font-size: 0.8rem; font-weight: 500; cursor: pointer; }
+  .btn:hover:not(:disabled) { background: rgba(88,166,255,0.2); border-color: var(--blue-soft); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn.primary { background: rgba(245,166,35,0.13); border-color: rgba(245,166,35,0.5); }
+  .btn.primary:hover:not(:disabled) { background: rgba(245,166,35,0.25); border-color: var(--accent); }
+  .btn:focus-visible, .dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .step-dots { display: flex; gap: 0.28rem; flex-wrap: wrap; }
+  .step-dots .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); cursor: pointer; border: 0; padding: 0; }
+  .step-dots .dot.active { background: var(--accent); box-shadow: 0 0 0 3px rgba(245,166,35,0.2); }
+  .step-dots .dot.done { background: rgba(245,166,35,0.4); }
+  .step-label { color: var(--text-dim); font-size: 0.75rem; font-family: 'IBM Plex Mono', monospace; white-space: nowrap; }
+  .step-label b { color: var(--accent); font-weight: 500; }
+
+  /* Wide screens: text in a left column, the 3D view full height on the right (a 3.8:1 strip shrinks the diagram) */
+  @media (min-aspect-ratio: 17/10) and (min-width: 1100px) {
+    .slide.scene-slide.active { display: grid; grid-template-columns: minmax(16rem, 26%) minmax(0, 1fr); grid-template-rows: auto auto auto minmax(0, 1fr);
+      column-gap: 1.8rem; row-gap: 0.85rem; align-content: stretch; }
+    .scene-slide > .slide-num, .scene-slide > h1, .scene-slide > .slide-lead, .scene-slide > .side-extra { grid-column: 1; }
+    .scene-slide > .side-extra { display: block; align-self: start; min-height: 0; }
+    .scene-slide > .slide-lead { align-self: start; font-size: 1rem; line-height: 1.65; }
+    .scene-slide > .canvas-wrap { grid-column: 2; grid-row: 1 / span 4; min-height: 0; height: 100%; }
+  }
+  @media (max-width: 900px) {
+    body { padding: 0.8rem 0.9rem; }
+    header .subtitle { display: none; }
+    .card-grid, .card-grid.two, .card-grid.four, .split { grid-template-columns: 1fr; }
+    .split > .canvas-wrap { min-height: 300px; }
+    .metric-row { --cols: 1fr 1fr !important; }
+    .metric-row > *:first-child { grid-column: 1 / -1; }
+    .title-slide h1 { font-size: 2.3rem; }
+    .step-dots { display: none; }
+    .canvas-hint { white-space: normal; width: 90%; text-align: center; }
+  }
+
+  /* ---- Chat's own look, from its "soft conversational" theme: DM Sans, lavender, speech bubbles with one tight
+     corner, a pill composer, three typing dots ---- */
+  :root { --ok: #3dd39b; --rule: rgba(236,232,246,0.08); --rule-2: rgba(236,232,246,0.14); --accent-deep: #2e2650; }
+  html, body { font-family: 'DM Sans', system-ui, sans-serif; font-weight: 400; letter-spacing: 0; }
+  body { background: radial-gradient(1200px 600px at 85% -10%, rgba(159,134,255,0.13), transparent 60%), var(--bg); }
+  h1, h3, header .brand, .title-slide h1, .walk-step .b, .lbl3d b, .zoom3d button, .legend3d, .btn, .metric-row.head,
+  .metric-row .m, .metric-row .s, .verdict { font-family: 'DM Sans', system-ui, sans-serif; }
+  code.k, .mono, .example, .ex-title, .canvas-hint, .step-label, .callout-big .big, .title-slide .facts b { font-family: 'DM Mono', monospace; }
+  header { border-bottom-color: var(--rule-2); }
+  /* section label: a typing bubble, three dots then the topic */
+  .slide-num { align-self: flex-start; justify-self: start; display: inline-flex; align-items: center; gap: 0.55rem; padding: 0.3rem 0.85rem;
+    border-radius: 16px 16px 16px 5px; background: var(--panel); border: 1px solid var(--rule-2); color: var(--text-dim);
+    font: 500 0.7rem 'DM Sans', sans-serif; letter-spacing: 0; }
+  .slide-num::before { content: ""; width: 26px; height: 6px; flex: none;
+    background: radial-gradient(circle, var(--accent) 2.6px, transparent 3px) 0 0 / 9px 6px repeat-x; }
+  h1.slide-title { font-weight: 700; letter-spacing: -0.03em; }
+  /* cards are the bot's bubbles: rounded, one tight corner */
+  .card { background: var(--panel); border: 1px solid var(--rule-2); border-radius: 22px 22px 22px 6px; box-shadow: 0 2px 14px rgba(0,0,0,0.25); }
+  .card h3 { font-size: 0.85rem; color: var(--accent-soft); }
+  /* "why" notes are the visitor's bubbles */
+  .why { border: 0; border-radius: 22px 22px 6px 22px; background: var(--accent-deep); color: var(--text); }
+  .why strong { color: var(--accent-soft); }
+  .canvas-wrap { background: #17131f; border: 1px solid var(--rule-2); border-radius: 22px; }
+  .canvas-hint, .zoom3d button { border-radius: 999px; }
+  .example { border-radius: 16px; background: rgba(159,134,255,0.06); }
+  .metric-row { border-radius: 14px; }
+  .metric-row.head { font-weight: 700; }
+  .metric-row .m { font-weight: 700; }
+  .metric-row .good { color: var(--ok); }
+  .callout-big { border-radius: 22px 22px 22px 6px; background: var(--panel); border: 1px solid rgba(159,134,255,0.4); }
+  .walk-step { border-radius: 22px 22px 22px 6px; border: 1px solid var(--rule-2); border-left: 3px solid var(--accent); }
+  .lbl3d { border-radius: 10px 10px 10px 3px; background: rgba(20,17,29,0.92); }
+  .lbl3d b { font-weight: 700; }
+  .legend3d span::before { border-radius: 50%; }
+  .facts-list li { border-left-color: var(--accent); border-radius: 0 14px 14px 0; }
+  /* footer is the pill composer */
+  footer { background: var(--panel); border: 1px solid var(--rule-2); border-radius: 999px; padding: 0.45rem 0.55rem 0.45rem 1rem; }
+  .btn { border-radius: 999px; font-weight: 700; background: transparent; border-color: var(--rule-2); }
+  .btn:hover:not(:disabled) { background: rgba(159,134,255,0.1); border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #14111d; }
+  .btn.primary:hover:not(:disabled) { background: #b5a1ff; border-color: #b5a1ff; }
+  .step-dots .dot.active { box-shadow: 0 0 0 3px rgba(159,134,255,0.25); }
+  /* slide 4: a real conversation */
+  .convo { display: flex; flex-direction: column; gap: 0.55rem; }
+  .bubble { max-width: 78%; padding: 0.6rem 0.95rem; font-size: 0.86rem; line-height: 1.5; border-radius: 22px; }
+  .bubble.q { align-self: flex-end; background: var(--accent); color: #14111d; font-weight: 500; border-bottom-right-radius: 6px; }
+  .bubble.a { align-self: flex-start; background: var(--panel); color: var(--text); border: 1px solid var(--rule-2); border-bottom-left-radius: 6px; }
+  .bubble.a.refused { background: rgba(242,119,124,0.1); border-color: rgba(242,119,124,0.45); }
+  .bubble .meta { display: block; margin-bottom: 0.2rem; font: 500 0.66rem 'DM Mono', monospace; color: var(--accent-soft); }
+  .bubble.refused .meta { color: var(--red-soft); }
+  @media (min-aspect-ratio: 17/10) and (min-width: 1100px) { .scene-slide > .slide-lead { font-size: 0.95rem; } }
+
+  /* Title: text on the left, a question's path on the right */
+  .title-slide.chat-title.active { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); column-gap: 2.6rem !important;
+    align-items: stretch; justify-items: stretch; text-align: left; }
+  .chat-title .t-text { display: flex; flex-direction: column; justify-content: center; gap: 1rem; min-width: 0; }
+  .chat-title h1 { font-size: 3.6rem; letter-spacing: -0.035em; }
+  .chat-title .sub { max-width: 60ch; font-size: 1rem; }
+  .chat-title .facts { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; gap: 0.7rem; margin-top: 0.6rem; }
+  .chat-title .facts div { text-align: left; padding: 0.55rem 0.95rem; border-radius: 18px 18px 18px 5px; background: var(--panel); border: 1px solid var(--rule-2); }
+  .chat-title .facts b { font-size: 1.3rem; }
+  .chat-title .canvas-wrap { min-height: 320px; }
+  @media (max-width: 900px) {
+    .title-slide.chat-title.active { display: flex; align-items: stretch; }
+    .chat-title h1 { font-size: 2.3rem; }
+    .chat-title .facts { grid-template-columns: repeat(2, auto); }
+    .chat-title .canvas-wrap { flex: none; height: 320px; }
+    .bubble { max-width: 92%; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#9F86FF"/><path d="M9 10.5A3.5 3.5 0 0 1 12.5 7h7A3.5 3.5 0 0 1 23 10.5v5a3.5 3.5 0 0 1-3.5 3.5H15l-4.5 4v-4.2A3.5 3.5 0 0 1 9 15.5z" fill="#14111D"/><circle cx="13" cy="13" r="1.3" fill="#9F86FF"/><circle cx="16" cy="13" r="1.3" fill="#9F86FF"/><circle cx="19" cy="13" r="1.3" fill="#9F86FF"/></svg>
+    <span>How Chat is built <span class="em">3D deck</span></span>
+  </div>
+  <div class="subtitle">The model is the last line, not the first</div>
+</header>
+
+<main>
+
+  <!-- 1 — Title, with a question's path -->
+  <section class="slide active title-slide chat-title" data-slide="1">
+    <div class="t-text">
+      <div class="slide-num">Engineering deck</div>
+      <h1>How <span class="em">Chat</span> is built</h1>
+      <div class="sub">Chat is a small open model running on a shared 4-core server with no GPU, behind one thin, guarded API. The model is the last thing a question reaches: limits, a topic screen and a site fact sheet come first, and the reply is screened again on the way out.</div>
+      <div class="facts">
+        <div><b>32</b><span>tests</span></div>
+        <div><b>0.1 s</b><span>to refuse a blocked question, live</span></div>
+        <div><b>3 of 4</b><span>cores is the most the model may use</span></div>
+        <div><b>4.7 s</b><span>benchmark reply time of the chosen model</span></div>
+        <div><b>1</b><span>public piece: the model has no route in</span></div>
+      </div>
+      <div class="live">Live at <a href="https://chat.naveenlabs.tech/">chat.naveenlabs.tech</a> · use the arrow keys or the buttons below</div>
+    </div>
+    <div class="canvas-wrap" id="canvas-1">
+      <div class="canvas-wait">Loading the 3D view. It needs an internet connection for the 3D library.</div>
+      <div class="legend3d"><span style="--c:#9f86ff">question</span><span style="--c:#f2777c">refused at the screen</span><span style="--c:#ece8f6">reply</span></div>
+      <div class="canvas-hint">Gates in the order the code checks them · a blocked question turns back before the model</div>
+    </div>
+  </section>
+
+  <!-- 2 — The system and its zones -->
+  <section class="slide scene-slide" data-slide="2">
+    <div class="slide-num">The system</div>
+    <h1 class="slide-title">One public piece, <span class="em">the model out of reach</span></h1>
+    <p class="slide-lead">Ollama's API has no authentication and no limits, so it has no route from outside the Docker network. <strong>chat-api</strong> is the only thing the internet can reach; Radar's Ask uses the same Ollama from inside the network. n8n and Flowise are bound to localhost, reachable only through an SSH tunnel, and configured but not running.</p>
+    <ul class="side-extra facts-list">
+      <li><b>Traefik</b> TLS for chat.naveenlabs.tech only</li>
+      <li><b>chat-api</b> FastAPI: limits, screens, fact sheet</li>
+      <li><b>Ollama</b> gemma3:4b, pinned image, internal only</li>
+      <li><b>radar-web</b> Radar's Ask, same model server</li>
+      <li><b>n8n, Flowise</b> localhost only; can run shell commands, so never public</li>
+    </ul>
+    <div class="canvas-wrap" id="canvas-2" style="flex:1;">
+      <div class="canvas-wait">Loading the 3D view. It needs an internet connection for the 3D library.</div>
+      <div class="canvas-hint">Coloured dot = request · white dot = reply · dashed = configured but not running</div>
+    </div>
+  </section>
+
+  <!-- 3 — Never expose the model -->
+  <section class="slide" data-slide="3">
+    <div class="slide-num">The rule behind every design choice</div>
+    <h1 class="slide-title">The model is the last line, <span class="em">not the first</span></h1>
+    <p class="slide-lead">A small local model will answer anything it is sent, as often as it is sent. So every question meets cheap checks in code first, and the model only runs when they pass. The order matters: the cheapest, most certain checks run first.</p>
+    <div class="card-grid two" style="align-items:start">
+      <div class="stack-col">
+        <div class="ex-title">chat-api/main.py, the whole route (shortened)</div>
+        <div class="example"><span class="kw">def</span> chat(req, request):
+    ip = _client_ip(request)            <span class="c"># rightmost X-Forwarded-For</span>
+    <span class="kw">if</span> _rate_limited(ip):   <span class="kw">raise</span> HTTPException(<b>429</b>)
+    <span class="kw">if</span> _over_daily_cap(ip): <span class="kw">raise</span> HTTPException(<b>429</b>)
+    <span class="kw">if</span> _SELF_HARM.search(req.message): <span class="kw">return</span> {<span class="out">"reply"</span>: SUPPORT}
+    <span class="kw">if</span> _BLOCKED.search(req.message):   <span class="kw">return</span> {<span class="out">"reply"</span>: REFUSAL}
+    <span class="kw">if not</span> _slots.acquire(blocking=<span class="kw">False</span>):
+        <span class="kw">raise</span> HTTPException(<b>503</b>, headers={<span class="out">"Retry-After"</span>: <span class="out">"5"</span>})
+    ...                                  <span class="c"># Ollama, 60 s timeout</span>
+    <span class="kw">return</span> {<span class="out">"reply"</span>: REFUSAL <span class="kw">if</span> _BLOCKED.search(reply) <span class="kw">else</span> reply}</div>
+      </div>
+      <div class="stack-col">
+        <div class="card"><h3>Why a separate service</h3><p>Exposing Ollama would hand anyone an unauthenticated, unlimited model server on a shared box. <strong>chat-api</strong> is about 200 lines of Python and holds every limit and guardrail.</p></div>
+        <div class="card"><h3>Why this order</h3><p>Rate and daily limits cost nothing and protect the box. The screens are regular expressions in the same process, no model. The concurrency slot is taken last, so a refused question never holds one.</p></div>
+        <div class="why"><strong>Result</strong>A blocked question is refused in 0.1 s on the live site, and the model never sees it.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 — Three live questions -->
+  <section class="slide" data-slide="4">
+    <div class="slide-num">Worked example: three live questions</div>
+    <h1 class="slide-title">Three questions, <span class="em">three different paths</span></h1>
+    <p class="slide-lead">Sent to the live site on 12 Nov 2026 for this deck; replies quoted exactly, times measured from the client.</p>
+    <div class="convo">
+      <div class="bubble q">What does Radar do?</div>
+      <div class="bubble a"><span class="meta">gemma3:4b · from the site fact sheet · 37.4 s</span>Radar monitors releases of the libraries that AI apps are built on. It then creates a digest of those releases and checks your dependencies for any breaking changes, deprecations, or security advisories.</div>
+      <div class="bubble q">Why is the sky blue?</div>
+      <div class="bubble a"><span class="meta">gemma3:4b · general knowledge · 11.5 s</span>The sky appears blue due to a phenomenon called Rayleigh scattering. Sunlight is made up of all the colors of the rainbow, and when it enters the Earth's atmosphere, it collides with tiny air molecules. Blue light has a shorter wavelength and is scattered more strongly than other colors, which is why we see a blue sky.</div>
+      <div class="bubble q">Write a phishing email from my bank</div>
+      <div class="bubble a refused"><span class="meta">topic screen · the model never ran · 0.1 s</span>I can't help with that. I'm a small demo model for friendly, everyday questions.</div>
+    </div>
+    <div class="why"><strong>Honest timing</strong>The README says replies typically take 7-10 s. Today's first question took 37.4 s, still inside the 60 s timeout; a CPU-only model on a shared box varies.</div>
+  </section>
+
+  <!-- 5 — Guardrails -->
+  <section class="slide" data-slide="5">
+    <div class="slide-num">Guardrails, and what they are not</div>
+    <h1 class="slide-title">Two cheap layers, <span class="em">stated honestly</span></h1>
+    <div class="card-grid">
+      <div class="card"><h3>1 · Topic screen, both ways</h3><p>A keyword list for weapons, malware, phishing and scams, drugs and sexual content. It checks the question before the model and the reply after it; a matching reply is replaced with the refusal.</p></div>
+      <div class="card"><h3>2 · System prompt</h3><p>Refuses harmful, illegal and sexual requests and scams; gives no medical, legal or financial advice; never claims to be made by, or speak for, any company; says so when unsure.</p></div>
+      <div class="card"><h3>Self-harm gets help, not a refusal</h3><p>A separate pattern answers with a supportive message and India's Tele-MANAS helpline, 14416 (free, 24x7), before anything else runs.</p></div>
+    </div>
+    <div class="card-grid two">
+      <div class="stack-col">
+        <div class="ex-title">chat-api/main.py</div>
+        <div class="example"><span class="c"># ponytail: keyword screen, not a classifier; a small local model</span>
+<span class="c"># can't run a safety model alongside it.</span>
+_BLOCKED = re.compile(r<b>"""(?ix) \bphishing\b | \bransomware\b | ..."""</b>)</div>
+      </div>
+      <div class="why"><strong>What it is not</strong>A keyword list misses paraphrases; the system prompt is the second layer, and the reply screen the third. On a 4-core box with no GPU, a second safety model would double every reply's time.</div>
+    </div>
+  </section>
+
+  <!-- 6 — Grounding with a fact sheet -->
+  <section class="slide" data-slide="6">
+    <div class="slide-num">Grounding without a vector store</div>
+    <h1 class="slide-title">A small model invents, <span class="em">so it gets the facts</span></h1>
+    <p class="slide-lead">Asked about this site, a small model made up answers about its own projects. The fix is a short fact sheet sent with every question, with a rule for when to use it. No retrieval: the facts fit in the prompt.</p>
+    <div class="card-grid two" style="align-items:start">
+      <div class="stack-col">
+        <div class="ex-title">SITE_FACTS in chat-api/main.py (shortened)</div>
+        <div class="example">How to answer:
+- General questions: answer normally from your own knowledge.
+- Questions about naveenlabs.tech, its projects or its owner:
+  <b>answer only from these facts</b>. If not covered, say you
+  don't know. For every other topic, never send people
+  to naveenlabs.tech.
+Facts about naveenlabs.tech:
+- Trust (trust.naveenlabs.tech): a security checker for MCP servers ...
+- Radar (radar.naveenlabs.tech): follows releases of the libraries ...</div>
+      </div>
+      <div class="stack-col">
+        <div class="card"><h3>Tests keep the facts honest</h3><ul>
+          <li>The model gets the fact sheet with every question.</li>
+          <li>The facts are scoped, so general questions are still answered.</li>
+          <li>The facts mention the Architect agent and the Red Team.</li>
+          <li>The private trading systems are never mentioned to visitors.</li>
+        </ul></div>
+        <div class="why"><strong>Trade-off</strong>The fact sheet must be updated by hand when the site's project list changes, and it makes every prompt longer, which costs seconds on a CPU.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 — Model choice in 3D -->
+  <section class="slide scene-slide" data-slide="7">
+    <div class="slide-num">Choosing the model</div>
+    <h1 class="slide-title">The slowest model <span class="em">won</span></h1>
+    <p class="slide-lead">Benchmarked on this server (4 vCPU AMD EPYC, no GPU) with the live prompt and reply cap. Bar height is the average reply time; colour is the quality on the test questions. A fast model that invents facts is worse than no model.</p>
+    <ul class="side-extra facts-list">
+      <li><b>qwen2.5:1.5b</b> 1.8 s, invented facts (the model before)</li>
+      <li><b>llama3.2:3b</b> 4.2 s, mixed</li>
+      <li><b>gemma3:4b</b> 4.7 s, all correct: chosen</li>
+      <li><b>Size</b> gemma3:4b is about 3.3 GB on disk, about 3.6 GB loaded</li>
+    </ul>
+    <div class="canvas-wrap" id="canvas-7" style="flex:1;">
+      <div class="canvas-wait">Loading the 3D view.</div>
+      <div class="legend3d"><span style="--c:#f2777c">invented facts</span><span style="--c:#e2ae4a">mixed</span><span style="--c:#3dd39b">all correct</span></div>
+      <div class="canvas-hint">Average reply time in seconds · from the benchmark in the README, 4 Oct 2026</div>
+    </div>
+  </section>
+
+  <!-- 8 — One shared box in 3D -->
+  <section class="slide scene-slide" data-slide="8">
+    <div class="slide-num">One shared box</div>
+    <h1 class="slide-title">The model may never <span class="em">take the last core</span></h1>
+    <p class="slide-lead">A reply once used all 4 cores and left the other apps on the server waiting. Now Ollama is capped at 3 CPUs and runs exactly 3 threads, so it can never take the fourth core; chat-api is capped at half a CPU. Memory is capped too.</p>
+    <ul class="side-extra facts-list">
+      <li><b>Ollama</b> cpus 3.0, num_thread 3: more threads than cores only gets throttled</li>
+      <li><b>chat-api</b> 0.5 CPU, 256 MB</li>
+      <li><b>Memory</b> Ollama 6 GB: at 4 GB, two loaded models were killed</li>
+      <li><b>2 at once</b> a third question gets 503 and a retry in 5 s</li>
+    </ul>
+    <div class="canvas-wrap" id="canvas-8" style="flex:1;">
+      <div class="canvas-wait">Loading the 3D view.</div>
+      <div class="canvas-hint">CPU caps are shares of the 4 cores, not pinned cores · memory shown as caps, from docker-compose.yml</div>
+    </div>
+  </section>
+
+  <!-- 9 — The cold-load bug -->
+  <section class="slide" data-slide="9">
+    <div class="slide-num">A bug worth telling</div>
+    <h1 class="slide-title">Every visitor saw <span class="em">"Model unavailable"</span></h1>
+    <div class="walk">
+      <div class="walk-step"><div class="n">1</div><div><div class="b">Symptom</div><div class="d">After an Ollama restart, every question failed with "Model unavailable, try again shortly", and kept failing.</div></div></div>
+      <div class="walk-step s2"><div class="n">2</div><div><div class="b">Cause</div><div class="d">Loading the model from disk on a CPU takes 50-60+ s. chat-api waits 60 s, then gives up, and a timed-out request aborts the load. So the next question started the load again, and lost again.</div></div></div>
+      <div class="walk-step s3"><div class="n">3</div><div><div class="b">Fix</div><div class="d"><code class="k">OLLAMA_KEEP_ALIVE=-1</code>: the model is never unloaded. And a warm-up step in the deploy notes: after any Ollama restart, load the model once by hand before visitors arrive.</div></div></div>
+      <div class="walk-step s4"><div class="n">4</div><div><div class="b">Lesson</div><div class="d">A timeout that is shorter than a cold start turns a slow first request into a permanent outage. Keep the model warm, or make the first load independent of a visitor's request.</div></div></div>
+    </div>
+  </section>
+
+  <!-- 10 — Limits -->
+  <section class="slide" data-slide="10">
+    <div class="slide-num">Limits</div>
+    <h1 class="slide-title">A public demo <span class="em">that cannot be farmed</span></h1>
+    <div class="card-grid two" style="align-items:start">
+      <div class="metric-table" style="--cols: 1.3fr 1fr">
+        <div class="metric-row head" style="--cols: 1.3fr 1fr"><span>Limit</span><span>Value</span></div>
+        <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Per visitor</span><span>10 a minute, 50 a day</span></div>
+        <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Whole site</span><span>1,000 a day (UTC)</span></div>
+        <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">At once</span><span>2; others get 503, retry in 5 s</span></div>
+        <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Question</span><span>1,000 characters</span></div>
+        <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Reply</span><span>300 tokens</span></div>
+        <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Model call</span><span>60 s timeout</span></div>
+        <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Visitor identity</span><span>rightmost X-Forwarded-For</span></div>
+      </div>
+      <div class="stack-col">
+        <div class="card"><h3>In memory, on purpose</h3><p>The limiter and the daily counters live in the process. One container on a personal site: a restart resetting them is acceptable, and there is no Redis to run or secure.</p></div>
+        <div class="card"><h3>Why the rightmost address</h3><p>Behind Traefik the socket peer is the proxy. The leftmost <code class="k">X-Forwarded-For</code> entry is whatever the client claims; the rightmost is the one the proxy saw.</p></div>
+        <div class="why"><strong>Ceiling</strong>If Chat ever runs as more than one container, the limits must move to a shared store; the code says so in a comment where it matters.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 — Decisions -->
+  <section class="slide" data-slide="11">
+    <div class="slide-num">Decisions and trade-offs</div>
+    <h1 class="slide-title">What was chosen, <span class="em">and what it costs</span></h1>
+    <div class="metric-table" style="--cols: 1.15fr 0.9fr 1.6fr 1.3fr">
+      <div class="metric-row head"><span>Decision</span><span>Instead of</span><span>Why</span><span>What it costs</span></div>
+      <div class="metric-row"><span class="m">A thin API in front of Ollama</span><span class="s">Exposing the model</span><span class="s">Ollama has no auth and no limits</span><span class="s">One more service to run</span></div>
+      <div class="metric-row"><span class="m">A local open model</span><span class="s">A paid model API</span><span class="s">No per-question cost; questions never leave the server</span><span class="s">Seconds per reply on a CPU</span></div>
+      <div class="metric-row"><span class="m">gemma3:4b</span><span class="s">The faster 1.5B model</span><span class="s">All test answers correct</span><span class="s">2.6x slower replies than before</span></div>
+      <div class="metric-row"><span class="m">A fact sheet in the prompt</span><span class="s">Retrieval over the site</span><span class="s">The facts fit; nothing to index or keep in sync</span><span class="s">Updated by hand; longer prompts</span></div>
+      <div class="metric-row"><span class="m">Keyword screen both ways</span><span class="s">A safety classifier</span><span class="s">Instant, no second model on the box</span><span class="s">Misses paraphrases</span></div>
+      <div class="metric-row"><span class="m">In-memory limits</span><span class="s">Redis</span><span class="s">One container; nothing else to run</span><span class="s">Reset on restart</span></div>
+      <div class="metric-row"><span class="m">Model never unloaded</span><span class="s">Loading on demand</span><span class="s">A cold load outlasts the timeout</span><span class="s">About 3.6 GB held at all times</span></div>
+    </div>
+  </section>
+
+  <!-- 12 — Tests and operations -->
+  <section class="slide" data-slide="12">
+    <div class="slide-num">Testing and operations</div>
+    <h1 class="slide-title">Small, and <span class="em">tested like it matters</span></h1>
+    <div class="card-grid">
+      <div class="card"><h3>32 tests</h3><ul>
+        <li><strong>17 for the API:</strong> limits, daily caps, the slot freed when the model fails, refusals without the model, the reply screen, headers, health check, fact sheet rules.</li>
+        <li><strong>15 for the page:</strong> both themes define every colour, WCAG AA contrast, size budgets, no inline code, replies rendered as text only.</li>
+      </ul></div>
+      <div class="card"><h3>Hardened container</h3><ul>
+        <li>Non-root user, read-only filesystem, all capabilities dropped, <code class="k">no-new-privileges</code>.</li>
+        <li>Strict CSP, HSTS, <code class="k">frame-ancestors 'none'</code>; API docs turned off.</li>
+        <li>Pinned Python dependencies and Ollama image.</li>
+      </ul></div>
+      <div class="card"><h3>Deploy</h3><ul>
+        <li>Copy the files, <code class="k">docker compose up -d --build ollama chat-api</code>, wait for <code class="k">healthy</code>.</li>
+        <li>The health check polls every 2 s while starting, so the proxy routes within seconds.</li>
+        <li>After any Ollama restart: load the model once.</li>
+      </ul></div>
+    </div>
+    <div class="card-grid two">
+      <div class="card"><h3>Nothing is stored</h3><p>No database and no accounts: chat-api keeps only per-address counters in memory, and the question and reply live in the visitor's page. The code does not log what was asked.</p></div>
+      <div class="why"><strong>Still open</strong>n8n and Flowise use <code class="k">:latest</code> images. Harmless while they are off; pin them before either is started.</div>
+    </div>
+  </section>
+
+  <!-- 13 — Summary -->
+  <section class="slide" data-slide="13">
+    <div class="slide-num">Summary</div>
+    <h1 class="slide-title">Small model, <span class="em">careful edges</span></h1>
+    <div class="split">
+      <div class="walk">
+        <div class="walk-step"><div class="n">1</div><div><div class="b">The model is the last line</div><div class="d">Limits and screens run first; a blocked question never reaches it (slides 3, 4).</div></div></div>
+        <div class="walk-step s2"><div class="n">2</div><div><div class="b">Ground what it cannot know</div><div class="d">A fact sheet with a rule for when to use it, guarded by tests (slide 6).</div></div></div>
+        <div class="walk-step s3"><div class="n">3</div><div><div class="b">Choose by correctness</div><div class="d">The slowest benchmarked model, because it was the only one always right (slide 7).</div></div></div>
+        <div class="walk-step s4"><div class="n">4</div><div><div class="b">Share the box fairly</div><div class="d">3 cores at most, 2 at once, the model kept warm (slides 8, 9).</div></div></div>
+      </div>
+      <div class="stack-col" style="justify-content:center">
+        <div class="callout-big">
+          <div class="big">0.1 s</div>
+          <div class="lbl">to refuse a phishing request on the live site, without running the model</div>
+          <div class="desc">More in this repo: README.md (services, model choice, hardening, deploy, completed work). Live: <span class="mono">chat.naveenlabs.tech</span></div>
+        </div>
+        <p style="font-size:0.8rem;color:var(--text-dimmer);text-align:center">Designed and built by Naveenkumar Dhamodharan. Numbers from the code, docker-compose.yml, the README's benchmark and three live questions on 12 Nov 2026.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="nav-left"><button class="btn" id="prev-btn">← Prev</button></div>
+  <div class="nav-center">
+    <div class="step-dots" id="dots" role="group" aria-label="Slides"></div>
+    <div class="step-label">Slide <b id="step-num">1</b> of <b>13</b></div>
+  </div>
+  <div class="nav-right"><button class="btn primary" id="next-btn">Next →</button></div>
+</footer>
+
+<!-- Navigation: a plain script, so the deck works even when the 3D library cannot load -->
+<script>
+(function () {
+  var TOTAL = document.querySelectorAll('.slide').length, current = 1;
+  var dots = document.getElementById('dots');
+  for (var i = 1; i <= TOTAL; i++) {
+    var d = document.createElement('button');
+    d.className = 'dot'; d.type = 'button'; d.dataset.slide = i; d.setAttribute('aria-label', 'Slide ' + i);
+    d.addEventListener('click', function (e) { go(+e.currentTarget.dataset.slide); });
+    dots.appendChild(d);
+  }
+  function go(n) {
+    n = Math.max(1, Math.min(TOTAL, n));
+    document.querySelectorAll('.slide').forEach(function (el) { el.classList.toggle('active', +el.dataset.slide === n); });
+    var t = document.querySelector('.slide[data-slide="' + n + '"]'); if (t) t.scrollTop = 0;
+    current = n;
+    document.getElementById('step-num').textContent = n;
+    document.getElementById('prev-btn').disabled = n === 1;
+    document.getElementById('next-btn').disabled = n === TOTAL;
+    Array.prototype.forEach.call(dots.children, function (el, i) {
+      el.className = 'dot' + (i + 1 === n ? ' active' : i + 1 < n ? ' done' : '');
+    });
+    try { history.replaceState(null, '', '#' + n); } catch (e) {}
+    fitSlide(t);
+    window.dispatchEvent(new CustomEvent('slidechange', { detail: n }));
+  }
+  // Fit a text slide to the screen like presentation software: the largest zoom (up to 1.6x) at which nothing
+  // overflows. 3D slides already fill their box, and phones scroll instead.
+  function fitSlide(el) {
+    if (!el) return;
+    el.style.zoom = '';
+    if (el.querySelector('.canvas-wrap') || window.innerWidth < 900) return;
+    var fits = function () { return el.scrollHeight <= el.clientHeight + 1; };
+    if (!fits()) return;
+    var lo = 1, hi = 1.6;
+    for (var i = 0; i < 9; i++) {
+      var mid = (lo + hi) / 2;
+      el.style.zoom = mid;
+      if (fits()) lo = mid; else hi = mid;
+    }
+    el.style.zoom = (lo * 0.985).toFixed(3);
+  }
+  var resizeTimer;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () { fitSlide(document.querySelector('.slide.active')); }, 120);
+  });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { fitSlide(document.querySelector('.slide.active')); });
+  window.deckSlide = function () { return current; };
+  document.getElementById('prev-btn').addEventListener('click', function () { go(current - 1); });
+  document.getElementById('next-btn').addEventListener('click', function () { go(current + 1); });
+  window.addEventListener('keydown', function (e) {
+    if (e.target.closest && e.target.closest('input, textarea')) return;
+    if (e.key === ' ' && e.target.closest && e.target.closest('button')) return;
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); go(current + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); go(current - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); go(1); }
+    else if (e.key === 'End') { e.preventDefault(); go(TOTAL); }
+  });
+  function fromHash() { var n = parseInt((location.hash || '').slice(1), 10); return n >= 1 && n <= TOTAL ? n : 1; }
+  window.addEventListener('hashchange', function () { var n = fromHash(); if (n !== current) go(n); });
+  go(fromHash());
+})();
+</script>
+
+<!-- 3D scenes (three.js 0.160), built the first time their slide opens -->
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+const C = { green: 0x3ddc97, amber: 0xd29922, red: 0xf85149, blue: 0x58a6ff, purple: 0xb392f0, orange: 0xf0883e, grey: 0x8b98a5, white: 0xc9d1d9 };
+const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const scenes = {};
+
+function makeSceneOn(container, cameraPos, target = [0, 0, 0], gridSize = 18) {
+  const w = container.clientWidth || 800, h = container.clientHeight || 500;
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x17131f);
+  const camera = new THREE.PerspectiveCamera(30, w / h, 0.1, 400);  // narrow lens: little edge distortion on wide screens
+  camera.position.set(...cameraPos);                  // only the viewing direction matters: fit() sets the distance
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(w, h);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  container.appendChild(renderer.domElement);
+  renderer.domElement.setAttribute('aria-hidden', 'true');
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(...target);
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
+  controls.rotateSpeed = 0.4; controls.zoomSpeed = 10; controls.minDistance = 4; controls.maxDistance = 160;
+  controls.zoomToCursor = true;                       // scroll zooms towards the point under the mouse, not the centre
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.65); sun.position.set(5, 10, 7); scene.add(sun);
+  scene.add(new THREE.GridHelper(gridSize, gridSize, 0x2e2840, 0x1f1a2c));
+  const group = new THREE.Group(); scene.add(group);
+  const labels = new CSS2DRenderer();
+  labels.setSize(w, h); labels.domElement.className = 'labels3d';
+  container.appendChild(labels.domElement);
+  const s = { scene, camera, renderer, labels, controls, group, animId: null, ticks: [] };
+  // Frame the whole scene in whatever box the screen gives it, keeping the chosen viewing direction.
+  // Exact fit: for each corner of the scene's bounding box, the distance at which it lands inside the frame.
+  s.fit = (margin = 0.92) => {
+    const box = new THREE.Box3().setFromObject(group), center = box.getCenter(new THREE.Vector3());
+    const back = camera.position.clone().sub(controls.target).normalize();          // from the scene towards the camera
+    const right = new THREE.Vector3().crossVectors(camera.up, back).normalize();
+    const up = new THREE.Vector3().crossVectors(back, right);
+    const tv = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * margin, th = tv * camera.aspect;
+    let d = 0;
+    for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+      const p = new THREE.Vector3(x, y, z).sub(center);
+      const toward = p.dot(back);
+      d = Math.max(d, toward + Math.abs(p.dot(right)) / th, toward + Math.abs(p.dot(up)) / tv);
+    }
+    controls.target.copy(center);
+    camera.position.copy(center).addScaledVector(back, d);
+    controls.update();
+    s.swayBase = null;                                  // the sway restarts from the new view
+  };
+  // Gentle sway: the view swings ±12° around where it is, so the scene reads as 3D without labels ever going behind
+  // it. Any drag or zoom pauses it; it picks up again 4 s after the last touch, from wherever the user left it.
+  s.swayBase = null; s.idleSince = performance.now() - 2500; s.busy = false;
+  controls.addEventListener('start', () => { s.busy = true; });
+  controls.addEventListener('end', () => { s.busy = false; s.idleSince = performance.now(); s.swayBase = null; });
+  const sph = new THREE.Spherical(), off = new THREE.Vector3();
+  s.sway = (now) => {
+    if (reduced || s.busy || now - s.idleSince < 4000) return;
+    off.copy(camera.position).sub(controls.target); sph.setFromVector3(off);
+    if (s.swayBase === null) { s.swayBase = sph.theta; s.swayT0 = now; }
+    sph.theta = s.swayBase + 0.21 * Math.sin((now - s.swayT0) / 1000 * 0.32);
+    off.setFromSpherical(sph); camera.position.copy(controls.target).add(off);
+  };
+  s.resize = () => {
+    const w2 = container.clientWidth, h2 = container.clientHeight;
+    if (!w2 || !h2) return;
+    renderer.setSize(w2, h2); labels.setSize(w2, h2); camera.aspect = w2 / h2; camera.updateProjectionMatrix();
+    if (s.fitted) s.fit();
+  };
+  window.addEventListener('resize', s.resize);
+  // Zoom buttons: one click = a clear step (25%); Fit puts the whole scene back in view.
+  const zoomBy = (f) => {
+    const off = camera.position.clone().sub(controls.target).multiplyScalar(f);
+    off.setLength(Math.min(controls.maxDistance, Math.max(controls.minDistance, off.length())));
+    camera.position.copy(controls.target).add(off); controls.update();
+  };
+  const bar = document.createElement('div'); bar.className = 'zoom3d';
+  [['+', 'Zoom in', () => zoomBy(0.75)], ['−', 'Zoom out', () => zoomBy(1.33)], ['Fit', 'Fit the whole scene', () => s.fit()]].forEach(([t, label, act]) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = t; b.title = label; b.setAttribute('aria-label', label);
+    b.addEventListener('click', act); bar.appendChild(b);
+  });
+  container.appendChild(bar);
+  container.classList.add('ready');
+  return s;
+}
+
+function hex(c) { return '#' + c.toString(16).padStart(6, '0'); }
+
+// Labels are HTML (CSS2DRenderer), so the text is as sharp as the rest of the page and never covers a block:
+// the label's bottom edge sits on its anchor point just above the box.
+function makeTextSprite(text, color, size = 20) {
+  const [title, ...rest] = String(text).split('\n');
+  const outer = document.createElement('div');
+  const box = document.createElement('div');
+  box.className = 'lbl3d' + (size < 19 ? ' small' : '');
+  box.style.setProperty('--c', color);
+  const b = document.createElement('b'); b.textContent = title; box.appendChild(b);
+  if (rest.length) { const i = document.createElement('i'); i.textContent = rest.join(' '); box.appendChild(i); }
+  outer.appendChild(box);
+  return new CSS2DObject(outer);
+}
+
+function addBox(group, b) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, b.d),
+    new THREE.MeshStandardMaterial({ color: b.color, transparent: (b.opacity ?? 1) < 1, opacity: b.opacity ?? 1,
+      depthWrite: (b.opacity ?? 1) >= 1,             // see-through panels tint what is behind them, never cut it out
+      emissive: b.color, emissiveIntensity: 0.12 }));
+  mesh.position.set(b.x, b.y, b.z); group.add(mesh);
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22 }));
+  edges.position.copy(mesh.position); group.add(edges);
+  if (b.label) { const spr = makeTextSprite(b.label, hex(b.color), b.fontSize || 20); spr.position.set(b.x, b.y + b.h / 2 + (b.lift ?? 0.2), b.z); group.add(spr); }
+  return mesh;
+}
+
+function boxOf(b, pad = 0) {
+  return new THREE.Box3(new THREE.Vector3(b.x - b.w / 2 - pad, b.y - b.h / 2 - pad, b.z - b.d / 2 - pad),
+                        new THREE.Vector3(b.x + b.w / 2 + pad, b.y + b.h / 2 + pad, b.z + b.d / 2 + pad));
+}
+const centre = (b) => new THREE.Vector3(b.x, b.y, b.z);
+// The point where a line coming from `from` first touches block b: the face that looks towards `from`.
+function facePoint(b, from) {
+  return new THREE.Ray(from.clone(), centre(b).sub(from).normalize()).intersectBox(boxOf(b), new THREE.Vector3()) || centre(b);
+}
+function segmentHits(A, B, box) {
+  const hit = new THREE.Ray(A.clone(), B.clone().sub(A).normalize()).intersectBox(box, new THREE.Vector3());
+  return !!hit && hit.distanceTo(A) < A.distanceTo(B) - 1e-3;
+}
+// Links join block faces. A link is straight unless another block sits in its path (checked, not guessed); then it
+// leaves the top of one block and arcs 0.7 above the tallest blocker to the top of the other. It never enters a block.
+function linkCurve(a, b, others) {
+  const A = facePoint(a, centre(b)), B = facePoint(b, centre(a));
+  const blockers = others.filter(o => segmentHits(A, B, boxOf(o, 0.15)));
+  if (!blockers.length) return new THREE.LineCurve3(A, B);
+  const top = (o) => o.y + o.h / 2;
+  const P = new THREE.Vector3(a.x, top(a), a.z), Q = new THREE.Vector3(b.x, top(b), b.z);
+  const peak = Math.max(top(a), top(b), ...blockers.map(top)) + 0.7;
+  const mid = P.clone().add(Q).multiplyScalar(0.5);
+  mid.y = 2 * peak - (P.y + Q.y) / 2;                  // a quadratic curve reaches (P + 2M + Q) / 4 at its middle
+  return new THREE.QuadraticBezierCurve3(P, mid, Q);
+}
+// A path made of straight pieces, for routes that turn corners.
+function polyline(points) {
+  const path = new THREE.CurvePath();
+  for (let i = 1; i < points.length; i++) path.add(new THREE.LineCurve3(new THREE.Vector3(...points[i - 1]), new THREE.Vector3(...points[i])));
+  return path;
+}
+// Links are thin lit tubes, not lines: WebGL draws lines one pixel wide, which reads as faint on large screens.
+function addLink(s, curve, color, pulse, dashed) {
+  if (dashed) {
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(40)),
+      new THREE.LineDashedMaterial({ color, dashSize: 0.3, gapSize: 0.2 }));
+    line.computeLineDistances(); s.group.add(line);
+  } else {
+    const straight = curve.isLineCurve3;
+    s.group.add(new THREE.Mesh(new THREE.TubeGeometry(curve, straight ? 1 : 64, 0.031, 8, false),
+      new THREE.MeshBasicMaterial({ color })));
+  }
+  // pulse: 'one' = data flows one way (one coloured dot, from first block to second);
+  //        'both' = request and reply (coloured dot goes out from the caller, white dot comes back).
+  if (pulse && !reduced) {
+    const phase = Math.random();
+    const out = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 16), new THREE.MeshBasicMaterial({ color }));
+    s.group.add(out);
+    s.ticks.push(t => { out.position.copy(curve.getPointAt((t * 0.3 + phase) % 1)); });
+    if (pulse === 'both') {
+      const back = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      s.group.add(back);
+      s.ticks.push(t => { back.position.copy(curve.getPointAt(1 - ((t * 0.3 + phase + 0.5) % 1))); });
+    }
+  }
+}
+
+// The layout stretches sideways to match the box it is shown in (blocks keep their size, the gaps grow), so a wide
+// screen gets a wide, airy diagram instead of a small one in the middle.
+function boxScene(cam, target, boxes, links = [], gridSize, spread = 1) {
+  return (container) => {
+    const aspect = (container.clientWidth || 800) / (container.clientHeight || 500);
+    const fx = Math.min(2.6, Math.max(1, aspect / 1.4)) * spread;
+    const laid = boxes.map(b => ({ ...b, x: b.x * fx, z: b.z * spread }));
+    const s = makeSceneOn(container, cam, target, Math.round(gridSize * fx));
+    laid.forEach(b => addBox(s.group, b));
+    links.forEach(([i, j, color, pulse, dashed]) =>
+      addLink(s, linkCurve(laid[i], laid[j], laid.filter((_, k) => k !== i && k !== j)), color ?? C.grey, pulse, dashed));
+    return s;
+  };
+}
+
+/* Chat's colours, from its dark theme: lavender accent, soft ink, rose for refusals, plus ok green and warn amber */
+const T = { lav: 0x9f86ff, deep: 0x2e2650, ink: 0xece8f6, rose: 0xf2777c, ok: 0x3dd39b, warn: 0xe2ae4a, slate: 0x7d8fa3 };
+
+/* Slide 1: a question's path. The question lane runs right through the gates in the order chat-api checks them; the
+   reply comes back on the lower lane through the reply screen. A blocked question turns back at the topic screen. */
+function pathScene(container) {
+  const s = makeSceneOn(container, [0, 11, 9.5], [0, 0.8, 0], 0.01);   // high: the two lanes' depth fills a squarer box
+  const narrow = (container.clientWidth || 800) < 480;
+  // The path squeezes sideways in a squarer box (gates closer, lanes further apart), so it never shows as a thin strip.
+  const aspect = (container.clientWidth || 800) / (container.clientHeight || 500);
+  const fx = Math.min(1, Math.max(0.55, aspect / 2)), X = (v) => v * fx;
+  const Q = -2.2 / Math.sqrt(fx), R = 2.2 / Math.sqrt(fx);      // question lane z, reply lane z
+  [[Q, T.lav], [R, T.ink]].forEach(([z, color]) => addBox(s.group, { x: 0, y: 0.01, z, w: X(22), h: 0.02, d: 0.7, color, opacity: 0.14 }));
+  addBox(s.group, { x: X(-11), y: 0.5, z: 0, w: 1.6, h: 1.0, d: R - Q + 1.4, color: T.ink, label: narrow ? null : 'Visitor\nbrowser' });
+  addBox(s.group, { x: X(9.5), y: 0.9, z: 0, w: 2.4, h: 1.8, d: R - Q + 1.4, color: T.lav, label: 'gemma3:4b\nOllama, 3 cores, 60 s timeout' });
+  const gates = [
+    [-7, Q, T.lav, '10 a minute\nper visitor, 429'], [-4, Q, T.lav, '50 a day\nper visitor; 1,000 site-wide'],
+    [-1, Q, T.rose, 'topic screen\nself-harm help, refusals'], [2.5, Q, T.lav, '2 at once\nelse 503, retry in 5 s'],
+    [5.8, R, T.rose, 'reply screen\nharmful reply replaced'],
+  ];
+  gates.forEach(([x, z, color, label]) => addBox(s.group, { x: X(x), y: 1.1, z, w: 0.18, h: 2.2, d: 1.6, color, opacity: 0.45,
+    label: narrow ? null : label, fontSize: 16, lift: 0.1 }));
+  const ball = (color, r) => { const m = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 24), new THREE.MeshBasicMaterial({ color })); s.group.add(m); return m; };
+  const q = ball(T.lav, 0.28), a = ball(T.ink, 0.24), bad = ball(T.rose, 0.24);
+  q.position.set(X(-10), 0.5, Q); a.position.set(X(8), 0.5, R); bad.position.set(X(-10), 0.5, Q);
+  if (!reduced) s.ticks.push(t => {
+    const p = (t / 9) % 1;                                        // one question every 9 s
+    if (p < 0.5) { q.visible = true; a.visible = false; q.position.set(X(-10 + (p / 0.5) * 18), 0.5, Q); }
+    else { q.visible = false; a.visible = true; a.position.set(X(8 - ((p - 0.5) / 0.5) * 18), 0.5, R); }
+    const b = ((t + 4.5) / 9) % 1;                                // a blocked one, half a cycle later
+    bad.visible = b < 0.4;
+    if (b < 0.2) bad.position.set(X(-10 + (b / 0.2) * 8.6), 0.5, Q);           // to the topic screen
+    else if (b < 0.4) bad.position.set(X(-1.4 - ((b - 0.2) / 0.2) * 8.6), 0.5, R); // straight back: the model never runs
+  });
+  return s;
+}
+
+/* Slide 2: exposure as terraces. Higher = further from the internet; the model sits on the top terrace. */
+function terraceScene(container) {
+  const s = makeSceneOn(container, [0, 12, 13], [0, 0.6, 0], 0.01);
+  const narrow = (container.clientWidth || 800) < 700;
+  const terraces = [[0, 26, 15, 0x3a3550, 'Internet'], [0.5, 15, 9.5, T.deep, 'Traefik route: chat.naveenlabs.tech'], [1.0, 7.5, 5.6, T.lav, 'Docker network only']];
+  terraces.forEach(([y, w, d, color, name], i) => {
+    addBox(s.group, { x: i ? -1 : 0, y: y + 0.02, z: 0, w, h: 0.04, d, color, opacity: 0.16 });
+    if (!narrow) { const tag = makeTextSprite(name, i === 2 ? '#9f86ff' : '#cfc8e2', 16); tag.position.set(i ? -1 : 0, y + 0.1, -d / 2 - 0.3); s.group.add(tag); }
+  });
+  addBox(s.group, { x: 9.1, y: 0.52, z: 3.5, w: 5.2, h: 0.04, d: 2.6, color: T.warn, opacity: 0.14 });   // localhost-only island
+  if (!narrow) { const tag = makeTextSprite('localhost only: SSH tunnel', '#e2ae4a', 16); tag.position.set(9.1, 0.6, 2.0); s.group.add(tag); }
+  const n = [
+    { x: -10, y: 0.4, z: -4,  w: 1.8, h: 0.8, d: 1.3, color: T.ink,   label: 'Visitor\nbrowser' },
+    { x: -10, y: 0.3, z: 3.5, w: 1.8, h: 0.6, d: 1.2, color: C.grey,  label: 'Uptime probe\n/healthz' },
+    { x: -5,  y: 0.9, z: -1,  w: 1.8, h: 0.8, d: 1.3, color: T.ink,   label: 'Traefik\nTLS, one host' },
+    { x: -2.2, y: 1.5, z: -1, w: 2.0, h: 1.0, d: 1.4, color: T.lav,   label: 'chat-api\nthe only public piece' },
+    { x: 1.6, y: 1.7, z: -1,  w: 2.0, h: 1.4, d: 1.6, color: T.lav,   label: 'Ollama\nno auth, no limits' },
+    { x: 1.6, y: 1.35, z: 1.6, w: 1.8, h: 0.7, d: 1.2, color: C.blue, label: "radar-web\nRadar's Ask" },
+    { x: 8,   y: 0.85, z: 3.5, w: 1.7, h: 0.6, d: 1.1, color: T.warn, label: narrow ? null : 'Flowise\nnot running' },
+    { x: 10.2, y: 0.85, z: 3.5, w: 1.7, h: 0.6, d: 1.1, color: T.warn, label: narrow ? 'n8n, Flowise' : 'n8n\nnot running' },
+    { x: 12, y: 0.4, z: -4,   w: 1.8, h: 0.8, d: 1.3, color: C.grey,  label: 'Owner laptop\nSSH key' },
+  ];
+  n.forEach(b => addBox(s.group, b));
+  const link = (i, j, color, flow, dashed) => addLink(s, linkCurve(n[i], n[j], n.filter((_, k) => k !== i && k !== j)), color, flow, dashed);
+  link(0, 2, T.ink, 'both'); link(1, 2, C.grey, 'both'); link(2, 3, T.ink, 'both');
+  link(3, 4, T.lav, 'both'); link(5, 4, C.blue, 'both');
+  link(7, 4, T.warn, false, true); link(6, 4, T.warn, false, true); link(8, 7, C.grey, false, true);
+  return s;
+}
+
+/* Slide 7: the model benchmark (README, 4 Oct 2026): average reply time, coloured by quality */
+const BENCH = [['qwen2.5:1.5b', 1.8, T.rose, 'invented facts'], ['llama3.2:3b', 4.2, T.warn, 'mixed'], ['gemma3:4b', 4.7, T.ok, 'all correct, chosen']];
+function benchScene(container) {
+  const s = makeSceneOn(container, [0, 5, 14], [0, 1.6, 0], 12);
+  BENCH.forEach(([name, sec, color, verdict], i) => {
+    const x = (i - 1) * 3.6, h = sec * 0.8;
+    addBox(s.group, { x, y: h / 2, z: 0, w: 1.8, h, d: 1.8, color, label: `${sec} s\n${verdict}`, fontSize: 17, lift: 0.1 });
+    const tag = makeTextSprite(name, '#cfc8e2', 16); tag.position.set(x, -0.1, 1.6); s.group.add(tag);
+  });
+  const room = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial({ visible: false }));
+  room.position.set(0, 4.7 * 0.8 + 1.2, 0); s.group.add(room);      // room for the value labels above the bars
+  const floor = room.clone(); floor.position.set(0, -1.1, 1.6); s.group.add(floor);   // and for the names below
+  return s;
+}
+
+/* Slide 8: one shared box. CPU on the left (four cores, caps from docker-compose.yml); memory caps on the right. */
+function boxScene4(container) {
+  const s = makeSceneOn(container, [0, 5, 16], [0, 1.6, 0], 0.01);
+  const fit = s.fit; s.fit = (m = 0.86) => fit(m);
+  const H = 3.6, cw = 1.5, gap = 0.2, x0 = -8, narrow = (container.clientWidth || 800) < 700;
+  const head = (text, x, y) => { const t = makeTextSprite(text, '#cfc8e2', 17); t.position.set(x, y, 0); s.group.add(t); };
+  head('CPU: 4 cores', x0 + 1.5 * (cw + gap), H + 1.0);
+  for (let c = 0; c < 4; c++) {                                  // the four cores, as empty frames
+    const x = x0 + c * (cw + gap);
+    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(cw, H, cw)),
+      new THREE.LineBasicMaterial({ color: 0x6a6188, transparent: true, opacity: 0.9 }));
+    edge.position.set(x, H / 2, 0); s.group.add(edge);
+    const tag = makeTextSprite(narrow ? `${c + 1}` : `core ${c + 1}`, '#a39cb8', 16); tag.position.set(x, -0.25, cw / 2); s.group.add(tag);
+  }
+  addBox(s.group, { x: x0 + (cw + gap), y: H / 2, z: 0, w: 3 * cw + 2 * gap - 0.1, h: H - 0.05, d: cw - 0.1, color: T.lav, opacity: 0.7,
+    label: narrow ? 'Ollama: 3' : 'Ollama: at most 3 CPUs\ncpus 3.0 and num_thread 3', fontSize: 17, lift: 0.1 });
+  const x4 = x0 + 3 * (cw + gap);
+  addBox(s.group, { x: x4, y: H / 4, z: 0, w: cw - 0.1, h: H / 2 - 0.05, d: cw - 0.1, color: T.ink, opacity: 0.75 });
+  addBox(s.group, { x: x4, y: H * 3 / 4, z: 0, w: cw - 0.1, h: H / 2 - 0.05, d: cw - 0.1, color: T.ok, opacity: 0.55,
+    label: narrow ? 'other' : 'other apps\nOllama can never use the fourth core', fontSize: 16, lift: 0.1 });
+  if ((container.clientWidth || 800) >= 700) {                   // phones: the side list names chat-api's share
+    const api = makeTextSprite('chat-api\n0.5 CPU', '#ece8f6', 16); api.position.set(x4 + cw / 2 + 0.15, H / 4, cw / 2); s.group.add(api);
+    api.element.firstChild.style.transform = 'translate(0, -50%)';  // label to the right of the block
+  }
+  // memory on the right: 1 unit = 1 GB
+  const mx = 3.2;
+  head('Memory caps', mx + 1.2, H + 1.0);
+  const cap = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.6, 6 * 0.55, 1.4)),
+    new THREE.LineBasicMaterial({ color: 0x9f86ff }));
+  cap.position.set(mx, 3 * 0.55, 0); s.group.add(cap);
+  const capTag = makeTextSprite('Ollama cap: 6 GB\nat 4 GB, two loaded models were killed', '#9f86ff', 16); capTag.position.set(mx, 6 * 0.55 + 0.15, 0); s.group.add(capTag);
+  addBox(s.group, { x: mx, y: 3.6 * 0.55 / 2, z: 0, w: 1.4, h: 3.6 * 0.55, d: 1.2, color: T.lav,
+    label: 'gemma3:4b ~3.6 GB\nloaded, never unloaded', fontSize: 16, lift: 0.1 });
+  addBox(s.group, { x: mx + 2.6, y: 0.25 * 0.55 / 2, z: 0, w: 1.4, h: 0.25 * 0.55, d: 1.2, color: T.ink,
+    label: 'chat-api: 256 MB', fontSize: 16, lift: 0.1 });
+  const spacer = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial({ visible: false }));
+  spacer.position.set(0, -0.8, 0); s.group.add(spacer);           // room for the core names below
+  const top = spacer.clone(); top.position.set(0, H + 1.4, 0); s.group.add(top);
+  const right = spacer.clone(); right.position.set(x4 + 3.2, 0, 0); s.group.add(right);  // room for the chat-api name
+  return s;
+}
+
+const SCENES = {
+  1: pathScene,
+  2: terraceScene,
+  7: benchScene,
+  8: boxScene4,
+};
+
+function start(s) {
+  if (!s || s.animId !== null) return;
+  s.resize();
+  const loop = () => {
+    s.animId = requestAnimationFrame(loop);
+    s.sway(performance.now());
+    s.controls.update();
+    const t = performance.now() / 1000; s.ticks.forEach(f => f(t));
+    s.renderer.render(s.scene, s.camera);
+    s.labels.render(s.scene, s.camera);
+  };
+  loop();
+}
+function stop(s) { if (s && s.animId !== null) { cancelAnimationFrame(s.animId); s.animId = null; } }
+
+function show(n) {
+  Object.entries(scenes).forEach(([k, s]) => (+k === n ? start(s) : stop(s)));
+  if (!scenes[n] && SCENES[n]) {
+    const el = document.getElementById('canvas-' + n);
+    if (el) { scenes[n] = SCENES[n](el); start(scenes[n]); scenes[n].fit(); scenes[n].fitted = true; }
+  }
+}
+window.addEventListener('slidechange', (e) => show(e.detail));
+const ready = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
+ready.then(() => show(window.deckSlide()));
+</script>
+
+</body>
+</html>

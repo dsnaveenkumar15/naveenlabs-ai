@@ -93,6 +93,9 @@ DNS: an A record `chat` pointing at the VPS. Only `chat` is public.
 
 ## Architecture
 
+A visual walkthrough for presenting: [`docs/explainer.html`](docs/explainer.html) (open it in a browser; the 3D
+views need an internet connection for three.js).
+
 ```mermaid
 flowchart LR
     visitor(["Visitor"]) --> traefik["Traefik<br/>TLS, Host: chat.naveenlabs.tech"]
@@ -123,3 +126,4 @@ uses the same Ollama for embeddings (`nomic-embed-text`).
 | 2026-10-07 | "Soft conversational" theme, one-column home with topic cards, typing indicator; model never unloaded (cold load outlasted the timeout); facts mention the Architect and Red Team |
 | 2026-10-08 | Facts no longer describe the private trading systems (a test forbids it) |
 | 2026-10-11 | Pushed to a private GitHub repository |
+| 2026-11-12 | Engineering explainer deck (`docs/explainer.html`): 13 slides in Chat's own look, with 3D views of a question's path through the gates, exposure as terraces, the model benchmark and the shared CPU and memory budget; three live questions quoted with their measured times |
