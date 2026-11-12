@@ -304,10 +304,11 @@
       <li><b>Ollama</b> gemma3:4b, pinned image, internal only</li>
       <li><b>radar-web</b> Radar's Ask, same model server</li>
       <li><b>n8n, Flowise</b> localhost only; can run shell commands, so never public</li>
+      <li><b>Uptime probe</b> calls /healthz from outside, like a visitor</li>
     </ul>
     <div class="canvas-wrap" id="canvas-2" style="flex:1;">
       <div class="canvas-wait">Loading the 3D view. It needs an internet connection for the 3D library.</div>
-      <div class="canvas-hint">Coloured dot = request · white dot = reply · dashed = configured but not running</div>
+      <div class="canvas-hint">Each step up is one layer further from the internet · coloured dot = request, white dot = reply</div>
     </div>
   </section>
 
@@ -840,33 +841,36 @@ function pathScene(container) {
   return s;
 }
 
-/* Slide 2: exposure as terraces. Higher = further from the internet; the model sits on the top terrace. */
+/* Slide 2: exposure as steps. Each step up is one layer further from the internet; the model sits on the top step.
+   n8n and Flowise are left out (localhost only, not running); the side list names them. */
 function terraceScene(container) {
-  const s = makeSceneOn(container, [0, 12, 13], [0, 0.6, 0], 0.01);
+  const s = makeSceneOn(container, [0, 8, 15], [0, 1.2, 0], 0.01);
   const narrow = (container.clientWidth || 800) < 700;
-  const terraces = [[0, 26, 15, 0x3a3550, 'Internet'], [0.5, 15, 9.5, T.deep, 'Traefik route: chat.naveenlabs.tech'], [1.0, 7.5, 5.6, T.lav, 'Docker network only']];
-  terraces.forEach(([y, w, d, color, name], i) => {
-    addBox(s.group, { x: i ? -1 : 0, y: y + 0.02, z: 0, w, h: 0.04, d, color, opacity: 0.16 });
-    if (!narrow) { const tag = makeTextSprite(name, i === 2 ? '#9f86ff' : '#cfc8e2', 16); tag.position.set(i ? -1 : 0, y + 0.1, -d / 2 - 0.3); s.group.add(tag); }
+  const D = 7.5;                                                   // depth of every step
+  const steps = [
+    { x: -10, w: 8, top: 0.4, color: 0x4a4466, name: 'Internet' },
+    { x: -2.5, w: 7, top: 1.4, color: T.deep, name: 'Traefik route' },
+    { x: 6, w: 10, top: 2.4, color: T.lav, name: 'Docker network only' },
+  ];
+  const obstacles = steps.map(st => ({ x: st.x, y: st.top / 2, z: 0, w: st.w, h: st.top, d: D }));
+  steps.forEach((st, i) => {
+    addBox(s.group, { x: st.x, y: st.top / 2, z: 0, w: st.w, h: st.top, d: D, color: st.color, opacity: i === 2 ? 0.3 : 0.45 });
+    if (!narrow) { const tag = makeTextSprite(st.name, i === 2 ? '#c3b4ff' : '#cfc8e2', 17); tag.position.set(st.x, st.top + 0.05, D / 2 - 0.4); s.group.add(tag); }
   });
-  addBox(s.group, { x: 9.1, y: 0.52, z: 3.5, w: 5.2, h: 0.04, d: 2.6, color: T.warn, opacity: 0.14 });   // localhost-only island
-  if (!narrow) { const tag = makeTextSprite('localhost only: SSH tunnel', '#e2ae4a', 16); tag.position.set(9.1, 0.6, 2.0); s.group.add(tag); }
+  const on = (st, x, z, w, h, d, color, label) => ({ x, y: steps[st].top + h / 2, z, w, h, d, color, label });
   const n = [
-    { x: -10, y: 0.4, z: -4,  w: 1.8, h: 0.8, d: 1.3, color: T.ink,   label: 'Visitor\nbrowser' },
-    { x: -10, y: 0.3, z: 3.5, w: 1.8, h: 0.6, d: 1.2, color: C.grey,  label: 'Uptime probe\n/healthz' },
-    { x: -5,  y: 0.9, z: -1,  w: 1.8, h: 0.8, d: 1.3, color: T.ink,   label: 'Traefik\nTLS, one host' },
-    { x: -2.2, y: 1.5, z: -1, w: 2.0, h: 1.0, d: 1.4, color: T.lav,   label: 'chat-api\nthe only public piece' },
-    { x: 1.6, y: 1.7, z: -1,  w: 2.0, h: 1.4, d: 1.6, color: T.lav,   label: 'Ollama\nno auth, no limits' },
-    { x: 1.6, y: 1.35, z: 1.6, w: 1.8, h: 0.7, d: 1.2, color: C.blue, label: "radar-web\nRadar's Ask" },
-    { x: 8,   y: 0.85, z: 3.5, w: 1.7, h: 0.6, d: 1.1, color: T.warn, label: narrow ? null : 'Flowise\nnot running' },
-    { x: 10.2, y: 0.85, z: 3.5, w: 1.7, h: 0.6, d: 1.1, color: T.warn, label: narrow ? 'n8n, Flowise' : 'n8n\nnot running' },
-    { x: 12, y: 0.4, z: -4,   w: 1.8, h: 0.8, d: 1.3, color: C.grey,  label: 'Owner laptop\nSSH key' },
+    on(0, -11, 0, 1.8, 0.8, 1.4, T.ink, 'Visitor\nbrowser'),
+    on(1, -3, 0, 1.8, 0.8, 1.4, T.ink, 'Traefik\nTLS, chat.naveenlabs.tech only'),
+    on(2, 2.6, -0.2, 2.0, 1.0, 1.4, T.lav, 'chat-api\nthe only public piece'),
+    on(2, 7.6, -1.6, 2.2, 1.4, 1.6, T.lav, 'Ollama\nno auth, no limits'),
+    on(2, 7.6, 2.0, 1.8, 0.7, 1.2, C.blue, "radar-web\nRadar's Ask"),
   ];
   n.forEach(b => addBox(s.group, b));
-  const link = (i, j, color, flow, dashed) => addLink(s, linkCurve(n[i], n[j], n.filter((_, k) => k !== i && k !== j)), color, flow, dashed);
-  link(0, 2, T.ink, 'both'); link(1, 2, C.grey, 'both'); link(2, 3, T.ink, 'both');
-  link(3, 4, T.lav, 'both'); link(5, 4, C.blue, 'both');
-  link(7, 4, T.warn, false, true); link(6, 4, T.warn, false, true); link(8, 7, C.grey, false, true);
+  const link = (i, j, color) => addLink(s, linkCurve(n[i], n[j], [...n.filter((_, k) => k !== i && k !== j), ...obstacles]), color, 'both');
+  // The visitor's request climbs the step to Traefik (a stair route, not an arc over the riser).
+  const v = n[0], tr = n[1], riser = steps[1].x - steps[1].w / 2 - 0.3;
+  addLink(s, polyline([[v.x + v.w / 2, v.y, 0], [riser, v.y, 0], [riser, tr.y, 0], [tr.x - tr.w / 2, tr.y, 0]]), T.ink, 'both');
+  link(1, 2, T.ink); link(2, 3, T.lav); link(4, 3, C.blue);
   return s;
 }
 
