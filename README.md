@@ -62,12 +62,13 @@ Chat runs **gemma3:4b** (Google, open weights, ~3.3 GB). Chosen on 2026-10-04 by
 ## Container hardening
 
 chat-api runs as a non-root user with a read-only filesystem, all Linux capabilities dropped,
-`no-new-privileges`, 0.5 CPU and 256 MB, and a health check. Python dependencies and the Ollama image are pinned.
+`no-new-privileges`, 0.5 CPU and 256 MB, and a health check. Python dependencies and every image (Ollama, n8n, Flowise) are pinned.
 
 ## Tests
 
 ```powershell
 cd chat-api
+python -m pip install -r requirements-dev.txt   # the app's pins plus pytest and httpx
 python -m pytest -q        # limits, guardrails, daily caps, self-harm reply, headers, health check, page theme and markup
 ```
 
