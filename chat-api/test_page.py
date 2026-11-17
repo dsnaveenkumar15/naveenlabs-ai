@@ -75,7 +75,7 @@ def test_motion_only_without_reduced_motion():
 def test_page_opens_light_with_its_pack_and_mark():
     assert '<html lang="en" data-default-theme="light">' in HTML
     head = HTML[:HTML.index("</head>")]
-    assert head.index('src="theme.js?v=2"') < head.index('href="style.css?v=5"')
+    assert head.index('src="theme.js?v=2"') < head.index('href="style.css?v=')
     assert 'href="fonts/dm-sans-latin.woff2" as="font"' in head
     assert 'rel="icon" type="image/svg+xml" href="icon.svg?v=2"' in head
     assert "instrument-sans" not in HTML + CSS
@@ -117,19 +117,45 @@ def test_chat_opens_light_unless_the_visitor_chose():
     assert theme(system_dark=True) == "dark"            # no signature: the system setting, as before
 
 
-def test_home_is_one_column_greeting_topics_conversation_composer():
-    order = [HTML.index(s) for s in ('<h1', 'class="topics"', 'id="chat-window"', 'id="chat-form"')]
+def test_home_is_greeting_composer_projects_conversation():
+    order = [HTML.index(s) for s in ('<h1', 'id="chat-form"', 'id="starters"', 'id="chat-window"')]
     assert order == sorted(order)
-    topics = dict(re.findall(r'<div class="topic topic-(\w+)">(.*?)</div>', HTML, re.S))
-    assert list(topics) == ["trust", "radar", "blueprints", "about"]
-    assert all(body.count('class="starter"') >= 2 for body in topics.values())
+    cards = re.findall(r'<div class="project project-(\w+)" data-project="\1">(.*?)</div>', HTML, re.S)
+    assert [k for k, _ in cards] == ["trust", "radar", "blueprints", "tradfi", "web3", "chat"]
+    assert all(body.count('class="starter"') == 2 and "built?" in body for _, body in cards)
+    assert all(f'data-project="{k}"' in body for k, body in cards)
+    assert all(body.count("data-section=") == 1 for _, body in cards)      # the second question shows a prepared section
     assert 'role="log"' in HTML and 'aria-live="polite"' in HTML
+
+
+def test_cards_fold_away_and_come_back():
+    assert 'id="show-projects"' in HTML and "show-projects" in JS and ".hidden" in JS
+
+
+def test_answers_are_rendered_from_a_markdown_subset_with_dom_nodes():
+    assert "function render(" in JS
+    for tag in ("h2", "h3", "ul", "li", "strong", "code", "p"):
+        assert f'createElement("{tag}")' in JS, tag
+
+
+def test_answers_stream_and_send_the_current_project():
+    assert "getReader()" in JS and "currentProject" in JS and "project: currentProject" in JS
+
+
+def test_more_buttons_ask_for_the_detailed_section():
+    assert "More on the" in JS and "detail: true" in JS
+    for section in ("architecture", "strengths", "intelligence"):
+        assert f'"{section}"' in JS, section
+
+
+def test_the_greeting_says_what_chat_knows():
+    assert "Ask about any of the six projects, or anything else." in HTML
 
 
 def test_every_icon_used_is_in_the_sprite_and_within_budget():
     sprite = (STATIC / "icons.svg").read_text(encoding="utf-8")
     used = set(re.findall(r'icons\.svg#([\w-]+)', HTML))
-    assert {"i-trust", "i-radar", "i-blueprints", "i-about", "i-send"} <= used
+    assert {"i-trust", "i-radar", "i-blueprints", "i-tradfi", "i-web3", "i-chat", "i-send"} <= used
     assert all(f'id="{icon}"' in sprite for icon in used)
     assert (STATIC / "icons.svg").stat().st_size <= 15_000
 
@@ -149,8 +175,8 @@ def rule(selector):
     return m.group(1)
 
 
-def test_composer_stays_in_view():
-    assert "position: sticky" in rule(".composer") and "bottom:" in rule(".composer")
+def test_composer_stays_at_the_top():
+    assert "position: sticky" in rule(".composer") and re.search(r"(^|;)\s*top: \d", rule(".composer"))
 
 
 def test_long_words_wrap_inside_bubbles():

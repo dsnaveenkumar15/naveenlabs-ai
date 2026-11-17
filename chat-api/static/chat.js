@@ -3,28 +3,83 @@ const form = document.getElementById("chat-form");
 const input = document.getElementById("chat-input");
 const sendBtn = document.getElementById("chat-send");
 const starters = document.getElementById("starters");
+const showProjects = document.getElementById("show-projects");
+const MORE = [["architecture", "More on the architecture"], ["strengths", "More on the strengths"],
+              ["intelligence", "More on the intelligence"]];
+let currentProject = null;     // the project of the last brief or answer, sent with every question
+let busy = false;
 
-document.querySelectorAll(".starter").forEach((button) => {
-  button.addEventListener("click", () => {
-    input.value = button.textContent;
-    form.requestSubmit();
-  });
-});
+// --- rendering: a small Markdown subset built from DOM nodes; text is never parsed as HTML ---
+
+function inline(parent, text) {
+  for (const part of text.split(/(\*\*[^*]+\*\*|`[^`]+`)/)) {
+    if (!part) continue;
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      const el = document.createElement("strong");
+      el.textContent = part.slice(2, -2);
+      parent.appendChild(el);
+    } else if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      const el = document.createElement("code");
+      el.textContent = part.slice(1, -1);
+      parent.appendChild(el);
+    } else {
+      parent.appendChild(document.createTextNode(part));
+    }
+  }
+}
+
+function render(text) {
+  const out = document.createDocumentFragment();
+  let list = null;
+  let para = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    const heading = line.match(/^(#{1,3})\s+(.*)$/);
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    if (!line.trim()) { list = null; para = null; continue; }
+    if (heading) {
+      const el = heading[1].length === 1 ? document.createElement("h2") : document.createElement("h3");
+      inline(el, heading[2]);
+      out.appendChild(el);
+      list = null; para = null;
+    } else if (bullet) {
+      if (!list) { list = document.createElement("ul"); out.appendChild(list); }
+      const li = document.createElement("li");
+      inline(li, bullet[1]);
+      list.appendChild(li);
+      para = null;
+    } else {
+      if (!para) { para = document.createElement("p"); out.appendChild(para); }
+      else para.appendChild(document.createTextNode(" "));
+      inline(para, line.trim());
+      list = null;
+    }
+  }
+  return out;
+}
+
+// --- the conversation ---
 
 function show(el) {
   windowEl.appendChild(el);
-  el.scrollIntoView({ block: "end" });        // scroll-margin keeps it above the composer
+  el.scrollIntoView({ block: "nearest" });
   return el;
 }
 
 function addMessage(text, cls) {
   const el = document.createElement("div");
   el.className = `msg ${cls}`;
-  el.textContent = text;                       // replies are text, never markup
+  el.textContent = text;
   return show(el);
 }
 
-// Three dots while the model answers; screen readers hear one short line instead.
+function addAnswer() {
+  const el = document.createElement("div");
+  el.className = "msg msg-bot msg-rich";
+  return show(el);
+}
+
+// Three dots until the first words arrive; screen readers hear one short line instead.
 function addTyping() {
   const el = document.createElement("div");
   el.className = "msg msg-pending";
@@ -39,39 +94,116 @@ function addTyping() {
   return show(el);
 }
 
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const message = input.value.trim();
-  if (!message) return;
+function addMoreButtons(project) {
+  const row = document.createElement("div");
+  row.className = "more";
+  for (const [section, label] of MORE) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "more-btn";
+    button.textContent = label;
+    button.addEventListener("click", () => ask({ message: label, project, section, detail: true }));
+    row.appendChild(button);
+  }
+  show(row);
+}
 
-  if (starters) starters.remove();
-  addMessage(message, "msg-user");
-  input.value = "";
+function foldProjects() {
+  if (!starters || starters.hidden) return;
+  starters.hidden = true;
+  showProjects.hidden = false;
+  showProjects.setAttribute("aria-expanded", "false");
+}
+
+if (showProjects) {
+  showProjects.addEventListener("click", () => {
+    starters.hidden = !starters.hidden;
+    showProjects.setAttribute("aria-expanded", String(!starters.hidden));
+  });
+}
+
+// --- asking: the answer arrives as NDJSON lines (text chunks, replace, error, then done) ---
+
+async function ask(body) {
+  if (busy) return;
+  busy = true;
+  foldProjects();
+  addMessage(body.message, "msg-user");
   input.disabled = true;
   sendBtn.disabled = true;
-  const pending = addTyping();
+  let pending = addTyping();
+  let bubble = null;
+  let text = "";
+  const paint = () => {
+    if (pending) { pending.remove(); pending = null; }
+    if (!bubble) bubble = addAnswer();
+    bubble.replaceChildren(render(text));
+  };
 
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ project: currentProject, ...body }),
     });
-    pending.remove();
     if (!res.ok) {
       let detail = "Something went wrong. Try again in a minute.";
-      try { detail = (await res.json()).detail || detail; } catch (_) { /* keep the default */ }
+      try {
+        const data = await res.json();
+        if (typeof data.detail === "string") detail = data.detail;
+      } catch (_) { /* keep the default */ }
+      if (pending) pending.remove();
       addMessage(detail, "msg-error");
-    } else {
-      const data = await res.json();
-      addMessage(data.reply, "msg-bot");
+      return;
     }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let done = null;
+    for (;;) {
+      const { value, done: end } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !end });
+      let cut;
+      while ((cut = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, cut).trim();
+        buffer = buffer.slice(cut + 1);
+        if (!line) continue;
+        const msg = JSON.parse(line);
+        if (typeof msg.text === "string") { text += msg.text; paint(); }
+        else if (typeof msg.replace === "string") { text = msg.replace; paint(); }
+        else if (typeof msg.error === "string") {
+          if (pending) { pending.remove(); pending = null; }
+          addMessage(msg.error, "msg-error");
+        } else if (msg.done) done = msg;
+      }
+      if (end) break;
+    }
+    if (pending) pending.remove();
+    if (done && done.project) currentProject = done.project;
+    if (done && done.kind === "brief" && !body.detail && done.project) addMoreButtons(done.project);
   } catch (err) {
-    pending.remove();
+    if (pending) pending.remove();
     addMessage("The model could not be reached. Check your connection and try again.", "msg-error");
   } finally {
+    busy = false;
     input.disabled = false;
     sendBtn.disabled = false;
     input.focus();
   }
+}
+
+document.querySelectorAll(".starter").forEach((button) => {
+  button.addEventListener("click", () => {
+    const body = { message: button.textContent, project: button.dataset.project };
+    if (button.dataset.section) { body.section = button.dataset.section; body.detail = true; }
+    ask(body);
+  });
+});
+
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = "";
+  ask({ message });
 });
