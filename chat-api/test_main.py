@@ -290,3 +290,13 @@ def test_the_image_ships_every_local_module_and_the_briefs():
     for name in imported | {"main"}:
         assert f"{name}.py" in copied, name
     assert "COPY briefs ./briefs" in copied and "COPY static ./static" in copied
+
+
+def test_the_model_gets_time_to_read_a_whole_brief(monkeypatch):
+    # A project prompt is ~1,400 tokens: on this CPU the first word can come after more than 60 s when another answer
+    # is ahead in the queue (one 503 in the 2026-11-17 live check).
+    timeouts = []
+    reset(monkeypatch)
+    monkeypatch.setattr(main.urllib.request, "urlopen", lambda req, timeout=0: timeouts.append(timeout) or FakeStream(["x"]))
+    post({"message": "How is Trust built?", "project": "trust"})
+    assert timeouts == [180]

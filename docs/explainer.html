@@ -328,7 +328,7 @@
     <span class="kw">if</span> _BLOCKED.search(req.message):   <span class="kw">return</span> {<span class="out">"reply"</span>: REFUSAL}
     <span class="kw">if not</span> _slots.acquire(blocking=<span class="kw">False</span>):
         <span class="kw">raise</span> HTTPException(<b>503</b>, headers={<span class="out">"Retry-After"</span>: <span class="out">"5"</span>})
-    ...                                  <span class="c"># Ollama, 60 s timeout</span>
+    ...                                  <span class="c"># Ollama, 180 s timeout</span>
     <span class="kw">return</span> {<span class="out">"reply"</span>: REFUSAL <span class="kw">if</span> _BLOCKED.search(reply) <span class="kw">else</span> reply}</div>
       </div>
       <div class="stack-col">
@@ -352,7 +352,7 @@
       <div class="bubble q">Write a phishing email from my bank</div>
       <div class="bubble a refused"><span class="meta">topic screen · the model never ran · 0.1 s</span>I can't help with that. I'm a small demo model for friendly, everyday questions.</div>
     </div>
-    <div class="why"><strong>Honest timing</strong>The README says replies typically take 7-10 s. Today's first question took 37.4 s, still inside the 60 s timeout; a CPU-only model on a shared box varies.</div>
+    <div class="why"><strong>Honest timing</strong>The README says replies typically take 7-10 s. Today's first question took 37.4 s, still inside the time limit; a CPU-only model on a shared box varies.</div>
   </section>
 
   <!-- 5 — Guardrails -->
@@ -454,7 +454,7 @@ Routing (chat-api/briefs.py):
     <h1 class="slide-title">Every visitor saw <span class="em">"Model unavailable"</span></h1>
     <div class="walk">
       <div class="walk-step"><div class="n">1</div><div><div class="b">Symptom</div><div class="d">After an Ollama restart, every question failed with "Model unavailable, try again shortly", and kept failing.</div></div></div>
-      <div class="walk-step s2"><div class="n">2</div><div><div class="b">Cause</div><div class="d">Loading the model from disk on a CPU takes 50-60+ s. chat-api waits 60 s, then gives up, and a timed-out request aborts the load. So the next question started the load again, and lost again.</div></div></div>
+      <div class="walk-step s2"><div class="n">2</div><div><div class="b">Cause</div><div class="d">Loading the model from disk on a CPU takes 50-60+ s. chat-api waited 60 s then, gave up, and a timed-out request aborts the load. So the next question started the load again, and lost again.</div></div></div>
       <div class="walk-step s3"><div class="n">3</div><div><div class="b">Fix</div><div class="d"><code class="k">OLLAMA_KEEP_ALIVE=-1</code>: the model is never unloaded. And a warm-up step in the deploy notes: after any Ollama restart, load the model once by hand before visitors arrive.</div></div></div>
       <div class="walk-step s4"><div class="n">4</div><div><div class="b">Lesson</div><div class="d">A timeout that is shorter than a cold start turns a slow first request into a permanent outage. Keep the model warm, or make the first load independent of a visitor's request.</div></div></div>
     </div>
@@ -472,7 +472,7 @@ Routing (chat-api/briefs.py):
         <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">At once</span><span>2; others get 503, retry in 5 s</span></div>
         <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Question</span><span>1,000 characters</span></div>
         <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Reply</span><span>600 tokens, streamed</span></div>
-        <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Model call</span><span>60 s timeout</span></div>
+        <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Model call</span><span>180 s timeout</span></div>
         <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Visitor identity</span><span>rightmost X-Forwarded-For</span></div>
       </div>
       <div class="stack-col">
@@ -826,7 +826,7 @@ function pathScene(container) {
   const Q = -2.2 / Math.sqrt(fx), R = 2.2 / Math.sqrt(fx);      // question lane z, reply lane z
   [[Q, T.lav], [R, T.ink]].forEach(([z, color]) => addBox(s.group, { x: 0, y: 0.01, z, w: X(22), h: 0.02, d: 0.7, color, opacity: 0.14 }));
   addBox(s.group, { x: X(-11), y: 0.5, z: 0, w: 1.6, h: 1.0, d: R - Q + 1.4, color: T.ink, label: narrow ? null : 'Visitor\nbrowser' });
-  addBox(s.group, { x: X(9.5), y: 0.9, z: 0, w: 2.4, h: 1.8, d: R - Q + 1.4, color: T.lav, label: 'gemma3:4b\nOllama, 3 cores, 60 s timeout' });
+  addBox(s.group, { x: X(9.5), y: 0.9, z: 0, w: 2.4, h: 1.8, d: R - Q + 1.4, color: T.lav, label: 'gemma3:4b\nOllama, 3 cores, 180 s timeout' });
   const gates = [
     [-7, Q, T.lav, '10 a minute\nper visitor, 429'], [-4, Q, T.lav, '50 a day\nper visitor; 1,000 site-wide'],
     [-1, Q, T.rose, 'topic screen\nself-harm help, refusals'], [2.5, Q, T.lav, '2 at once\nelse 503, retry in 5 s'],

@@ -31,6 +31,7 @@ RATE_LIMIT = 10          # requests
 RATE_WINDOW = 60         # seconds
 MAX_MESSAGE_LEN = 1000
 MAX_REPLY_TOKENS = 600
+MODEL_TIMEOUT = 180     # seconds to the first word and between words: a whole brief takes 15-30 s to read, more in a queue
 # Matches Ollama's CPU cap (docker-compose cpus: 3): more threads than cores only gets throttled.
 MODEL_THREADS = int(os.environ.get("CHAT_MODEL_THREADS", "3"))
 # Behind Traefik the socket peer is the proxy, so the real visitor is the rightmost X-Forwarded-For entry.
@@ -201,7 +202,7 @@ def chat(req: ChatRequest, request: Request):
     http_req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode(),
                                       headers={"Content-Type": "application/json"})
     try:
-        upstream = urllib.request.urlopen(http_req, timeout=60)    # opened here so an unreachable model is still a 503
+        upstream = urllib.request.urlopen(http_req, timeout=MODEL_TIMEOUT)    # opened here: an unreachable model is a 503
     except Exception as exc:
         _slots.release()
         raise HTTPException(503, "Model unavailable, try again shortly.") from exc

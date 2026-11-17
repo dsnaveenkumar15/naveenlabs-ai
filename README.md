@@ -10,7 +10,7 @@ Status (2026-10-09): Chat and Ollama are deployed and healthy. n8n and Flowise a
 | Service | Address | Access | What it is |
 |---|---|---|---|
 | chat-api (Chat) | `chat.naveenlabs.tech` | public | Static chat page plus a thin, guarded API in front of the model |
-| ollama | internal only | none | Model runtime (`ollama/ollama:0.35.0`, capped at 3 of 4 CPU cores and 6 GB, model never unloaded: a cold load can outlast chat-api's 60 s timeout). No Traefik route; only chat-api, n8n, Flowise and Radar reach it at `http://ollama:11434` |
+| ollama | internal only | none | Model runtime (`ollama/ollama:0.35.0`, capped at 3 of 4 CPU cores and 6 GB, model never unloaded: a cold load can outlast chat-api's 180 s timeout). No Traefik route; only chat-api, n8n, Flowise and Radar reach it at `http://ollama:11434` |
 | n8n | `127.0.0.1:5678` (SSH tunnel) | private, Basic Auth | Workflow automation. Never public: its nodes can run shell commands |
 | flowise | `127.0.0.1:3000` (SSH tunnel) | private, Basic Auth | Low-code LLM app builder on the same Ollama |
 
@@ -95,7 +95,7 @@ docker compose exec ollama ollama pull gemma3:4b                         # first
 docker compose exec ollama ollama run gemma3:4b "Say ok."                # after any ollama restart: load the model once
 ```
 
-The warm-up matters: a cold load can take longer than chat-api's 60 s timeout, and a timed-out request aborts the
+The warm-up matters: a cold load can take longer than chat-api's 180 s timeout, and a timed-out request aborts the
 load, so without it every visitor gets "Model unavailable". `OLLAMA_KEEP_ALIVE=-1` then keeps the model loaded.
 
 DNS: an A record `chat` pointing at the VPS. Only `chat` is public.
