@@ -233,13 +233,16 @@ def test_model_failure_mid_stream_frees_the_slot_and_says_so(monkeypatch):
     assert main._slots.acquire(blocking=False)
 
 
-def test_the_general_prompt_lists_every_project_and_stays_short(monkeypatch):
+def test_the_general_prompt_names_the_projects_but_plugs_no_pages(monkeypatch):
+    # Live check 2026-11-17: with every project's address in the prompt, gemma3:4b ended "capital of Japan" with
+    # "more on the Radar project page". General questions do not need the addresses; project questions get their brief.
     seen = reset(monkeypatch)
     post({"message": "What can you help me with?"})
     system = seen[0]["messages"][0]["content"]
-    for host in ("trust.", "radar.", "blueprints.", "tradfi.", "web3.", "chat."):
-        assert f"{host}naveenlabs.tech" in system, host
-    assert len(main.BASE_PROMPT) <= 1200 and "For every other topic" in system
+    for name in ("Trust", "Radar", "Blueprints", "TradFi", "Web3", "Chat"):
+        assert name in system, name
+    assert ".naveenlabs.tech" not in system and "unless the user asks about them" in system
+    assert len(main.BASE_PROMPT) <= 1200
 
 
 def test_tradfi_and_web3_briefs_are_used(monkeypatch):
