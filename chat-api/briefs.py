@@ -8,7 +8,7 @@ PROJECTS = ("trust", "radar", "blueprints", "tradfi", "web3", "chat")
 NAMES = {"trust": "Trust", "radar": "Radar", "blueprints": "Blueprints", "tradfi": "TradFi", "web3": "Web3", "chat": "Chat"}
 SECTIONS = ("intro", "architecture", "strengths", "intelligence")
 HEADINGS = {name: name.capitalize() for name in SECTIONS}
-CONTEXT_CHARS = 1600        # about 400 tokens: the server reads a prompt at roughly 50-85 tokens a second
+CONTEXT_CHARS = 1600        # a section's short form stays under half of this, so the brief stays compact
 MORE = "<!-- more -->"
 # Never in a brief, a prompt or the page: brand names, hosts, private tools, advice.
 BANNED = ("zerodha", "kite", "binance", "n8n", "flowise", "portainer", "kuma", "tailscale", "187.126.",
@@ -107,8 +107,12 @@ than these those will would could should into more most some also just like make
 every only over such much many here know tell explain describe please thanks thank good best work works""".split())
 
 
+def _stem(word: str) -> str:
+    return word[:-1] if len(word) > 4 and word.endswith("s") and not word.endswith("ss") else word
+
+
 def _words(text: str) -> set:
-    return {word for word in re.findall(r"[a-z0-9]+", text.lower()) if len(word) > 3 and word not in _COMMON}
+    return {_stem(word) for word in re.findall(r"[a-z0-9]+", text.lower()) if len(word) > 3 and word not in _COMMON}
 
 
 def relevance(project: str, message: str, briefs: dict) -> int:
@@ -117,16 +121,10 @@ def relevance(project: str, message: str, briefs: dict) -> int:
     return len(_words(message) & _words(" ".join(s.short + " " + s.detail for s in brief.sections.values())))
 
 
-def model_context(project: str, message: str, briefs: dict) -> str:
-    """The sections that share most words with the question, detailed when they fit, within CONTEXT_CHARS."""
+def best_section(project: str, message: str, briefs: dict) -> str:
+    """The section that shares most meaningful words with the question; the intro when none does."""
     brief, asked = briefs[project], _words(message)
-    order = sorted(SECTIONS, key=lambda name: (-len(asked & _words(brief.sections[name].short + " " + brief.sections[name].detail)),
-                                               SECTIONS.index(name)))
-    text = f"{NAMES[project]}:"
-    for name in order:
-        for detail in (True, False):
-            block = "\n\n" + brief.section(name, detail)
-            if len(text) + len(block) <= CONTEXT_CHARS:
-                text += block
-                break
-    return text
+    scores = {name: len(asked & _words(brief.sections[name].short + " " + brief.sections[name].detail))
+              for name in SECTIONS}
+    best = max(SECTIONS, key=lambda name: (scores[name], -SECTIONS.index(name)))
+    return best if scores[best] else "intro"

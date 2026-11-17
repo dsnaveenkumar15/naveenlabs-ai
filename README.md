@@ -55,8 +55,9 @@ Chat runs **gemma3:4b** (Google, open weights, ~3.3 GB). Chosen on 2026-10-04 by
 - **Project briefs:** a small model knows nothing about naveenlabs.tech and invents answers about it, so each
   project has a checked brief in `chat-api/briefs/` (intro, architecture, strengths, intelligence; a short and a
   detailed form). `chat-api/briefs.py` routes a question: an overview question or a card gets the brief with no
-  model; another project question gets the model with only that brief's relevant sections (at most 1,600
-  characters, so the first words come quickly); anything else gets the model with the short `BASE_PROMPT`.
+  model; another project question gets the brief's best-matching section in detail, also with no model (the
+  model got project facts wrong even with the brief in its prompt, live check 2026-11-17); anything else gets
+  the model with the short `BASE_PROMPT`.
   **When a project's ARCHITECTURE.md changes, re-check its brief against it; keep `BASE_PROMPT`'s project list in
   step with the landing page's Work list.** Never put a broker or exchange brand, a server address or a private
   tool in a brief (a test checks).
@@ -110,7 +111,7 @@ flowchart LR
     subgraph api_inside["chat-api, per question"]
         direction TB
         limits["rate limits, daily caps,<br/>2 at once"] --> screen["topic screen<br/>on the question"]
-        screen --> prompt["brief (no model) or<br/>prompt + one brief"]
+        screen --> prompt["brief section (no model)<br/>or general prompt"]
         prompt --> reply_screen["topic screen<br/>on the reply"]
     end
     api --> api_inside

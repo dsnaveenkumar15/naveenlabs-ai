@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from briefs import CONTEXT_CHARS, banned_in, relevance, PROJECTS, find_project, load_briefs, model_context, prepared
+from briefs import CONTEXT_CHARS, banned_in, best_section, relevance, PROJECTS, find_project, load_briefs, prepared
 
 HEADINGS = {"intro": "Intro", "architecture": "Architecture", "strengths": "Strengths", "intelligence": "Intelligence"}
 
@@ -97,14 +97,13 @@ def test_naming_a_section_gets_that_section(briefs):
     assert prepared("What is photosynthesis?", None, briefs) is None
 
 
-def test_model_context_fits_the_budget_and_prefers_matching_sections(briefs_long):
-    ctx = model_context("trust", "which model scores the attacks?", briefs_long)
-    assert ctx.startswith("Trust:") and len(ctx) <= CONTEXT_CHARS and "## Intelligence" in ctx
+def test_best_section_prefers_the_matching_section(briefs_long):
+    assert best_section("trust", "which model scores the attacks?", briefs_long) == "intelligence"
+    assert best_section("trust", "which model scores the attack?", briefs_long) == "intelligence"   # plural or not
 
 
-def test_model_context_always_has_something(briefs_long):
-    ctx = model_context("radar", "zzz", briefs_long)
-    assert ctx.startswith("Radar:") and "## Intro" in ctx and len(ctx) <= CONTEXT_CHARS
+def test_best_section_falls_back_to_the_intro(briefs_long):
+    assert best_section("radar", "zzz", briefs_long) == "intro"
 
 
 REAL = Path(__file__).parent / "briefs"

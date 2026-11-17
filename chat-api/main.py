@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from briefs import NAMES, find_project, load_briefs, model_context, prepared, relevance
+from briefs import NAMES, best_section, find_project, load_briefs, prepared, relevance
 
 MODEL = os.environ.get("CHAT_MODEL", "gemma3:4b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434/api/chat")
@@ -73,10 +73,6 @@ BASE_PROMPT = (
     "facts given; if they do not cover it, say you don't know and name the project's page. For every other topic, "
     "answer from your own knowledge and never send people to naveenlabs.tech."
 )
-# Conditional: the page sends the last project with every question, so an unrelated question ("capital of France?")
-# must not be boxed into the brief.
-GROUNDING = ("If the question is about {name}: Answer only from this brief, and if it does not cover the question, "
-             "say you don't know and point to the project's page. Otherwise answer from your own knowledge.\n")
 BRIEFS = load_briefs(Path(__file__).parent / "briefs")
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -179,11 +175,15 @@ def chat(req: ChatRequest, request: Request):
     ready = prepared(req.message, project, BRIEFS)
     if ready is not None:
         return _answer(ready, "brief", find_project(req.message, None))
+    if project:
+        # Any other question about a project gets the prepared section that matches it best, in detail: the small
+        # model got project facts wrong even with the brief in its prompt (live check, 2026-11-17).
+        section = best_section(project, req.message, BRIEFS)
+        return _answer(f"# {NAMES[project]}\n\n" + BRIEFS[project].section(section, detail=True), "brief", project)
 
     if not _slots.acquire(blocking=False):
         raise HTTPException(503, "Busy, try again in a few seconds.", headers={"Retry-After": "5"})
-    system = BASE_PROMPT + ("\n" + GROUNDING.format(name=NAMES[project]) + model_context(project, req.message, BRIEFS)
-                            if project else "")
+    system = BASE_PROMPT
     payload = {
         "model": MODEL,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": req.message}],

@@ -184,14 +184,13 @@ def test_more_button_returns_the_detailed_section(monkeypatch):
     assert out[-1] == {"done": True, "kind": "brief", "project": "trust"}
 
 
-def test_detail_question_streams_from_the_model_with_only_that_brief(monkeypatch):
-    seen = reset(monkeypatch, chunks=["Th", "e guard"])
-    out = lines(post({"message": "How does the Trust guard block a tool?"}))
-    system = seen[0]["messages"][0]["content"]
-    assert [o.get("text") for o in out[:-1]] == ["Th", "e guard"]
-    assert out[-1] == {"done": True, "kind": "model", "project": "trust"}
-    assert "Trust:" in system and "Radar:" not in system and "Answer only from this brief" in system
-    assert seen[0]["stream"] is True and seen[0]["options"]["num_predict"] == 600
+def test_typed_project_question_gets_the_best_matching_section_without_the_model(monkeypatch):
+    # gemma3:4b got project facts wrong even from the brief (2026-11-17 live check), so the owner chose: answer a
+    # typed project question with the prepared section that matches it best.
+    seen = reset(monkeypatch)
+    out = lines(post({"message": "How does the Trust code guard stop an attack?"}))
+    assert seen == [] and out[-1] == {"done": True, "kind": "brief", "project": "trust"}
+    assert out[0]["text"].startswith("# Trust") and "## Strengths" in out[0]["text"] and "0 of 178" in out[0]["text"]
 
 
 def test_general_questions_stream_without_a_brief(monkeypatch):
@@ -204,7 +203,7 @@ def test_general_questions_stream_without_a_brief(monkeypatch):
 def test_follow_up_uses_the_project_the_page_sends(monkeypatch):
     seen = reset(monkeypatch)
     out = lines(post({"message": "how is it tested?", "project": "radar"}))
-    assert "Radar:" in seen[0]["messages"][0]["content"] and out[-1]["project"] == "radar"
+    assert seen == [] and out[-1] == {"done": True, "kind": "brief", "project": "radar"} and "## Strengths" in out[0]["text"]
 
 
 def test_unknown_project_or_section_is_rejected(monkeypatch):
@@ -239,10 +238,9 @@ def test_tradfi_and_web3_briefs_are_used(monkeypatch):
 
 def test_no_prompt_names_brands_hosts_or_private_tools(monkeypatch):
     seen = reset(monkeypatch)
-    for body in ({"message": "What is photosynthesis?"}, {"message": "How does TradFi place an order?"},
-                 {"message": "how does it settle orders?", "project": "web3"}, {"message": "Who builds Chat and how?"}):
+    for body in ({"message": "What is photosynthesis?"}, {"message": "Write a haiku about rain"}):
         post(body)
-    assert len(seen) == 4
+    assert len(seen) == 2
     for payload in seen:
         assert banned_in(payload["messages"][0]["content"]) == []
 
@@ -251,11 +249,8 @@ def test_a_general_question_after_a_brief_is_not_boxed_into_it(monkeypatch):
     # The page sends the last project with every question; an unrelated question must still be answered normally.
     seen = reset(monkeypatch)
     out = lines(post({"message": "What's the capital of France?", "project": "trust"}))
-    system = seen[0]["messages"][0]["content"]
-    assert "Trust:" not in system and "If the question is about" not in system and out[-1]["project"] is None
-    seen.clear()
-    post({"message": "how is it tested?", "project": "trust"})            # a real follow-up still gets the brief
-    assert "Trust:" in seen[0]["messages"][0]["content"]
+    assert len(seen) == 1 and out[-1] == {"done": True, "kind": "model", "project": None}
+    assert seen[0]["messages"][0]["content"] == main.BASE_PROMPT
 
 
 def test_an_ollama_error_line_mid_stream_reaches_the_visitor(monkeypatch):

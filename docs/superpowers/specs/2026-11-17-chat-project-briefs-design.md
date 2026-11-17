@@ -117,6 +117,13 @@ Three paths, decided on the server:
 - Today's test that forbids TradFi and Web3 is replaced by one that checks their briefs are used.
 - Page tests: box above the cards, six cards, cards fold away after the first question, budgets still met.
 
+## Amendment 2026-11-17 (owner decision after the live check)
+
+The live check showed gemma3:4b getting project facts wrong even with the relevant brief sections in its prompt
+(it described Trust's code guard as agents probing the system). The owner chose: a typed project question gets the
+brief section that matches it best, in detail, with no model; the model answers only general questions. A question
+that names no project and shares no meaningful word with the last brief shown is a general question.
+
 ## Decided by the owner
 
 - Detailed answers about all six projects, including TradFi and Web3.
