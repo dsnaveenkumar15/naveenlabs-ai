@@ -15,18 +15,22 @@ import time
 import json
 import urllib.request
 from collections import defaultdict, deque
+from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
+from briefs import find_project, load_briefs, model_context, prepared
 
 MODEL = os.environ.get("CHAT_MODEL", "gemma3:4b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434/api/chat")
 RATE_LIMIT = 10          # requests
 RATE_WINDOW = 60         # seconds
 MAX_MESSAGE_LEN = 1000
-MAX_REPLY_TOKENS = 300
+MAX_REPLY_TOKENS = 600
 # Matches Ollama's CPU cap (docker-compose cpus: 3): more threads than cores only gets throttled.
 MODEL_THREADS = int(os.environ.get("CHAT_MODEL_THREADS", "3"))
 # Behind Traefik the socket peer is the proxy, so the real visitor is the rightmost X-Forwarded-For entry.
@@ -54,44 +58,24 @@ _BLOCKED = re.compile(r"""(?ix)
   | \b(porn|nsfw|explicit\s+sex)\w*
 """)
 
-SYSTEM_PROMPT = (
-    "You are the chat assistant on naveenlabs.tech, a small AI model running locally on this personal "
-    "site. Be concise and friendly. Only if the user asks who runs or built this site, say it was "
-    "built by Naveenkumar Dhamodharan as his personal AI playground; otherwise do not mention him. "
-    "Politely refuse anything harmful, illegal, sexual, hateful or dangerous, and anything that "
-    "writes scams, spam or messages pretending to be a real company or person. Do not give "
-    "medical, legal or financial advice. Never claim to be made by, or speak for, any company. "
-    "If you are not sure of a fact, say so instead of guessing."
+# Kept short: the server reads a prompt at roughly 50-85 tokens a second, so every line here delays the first word.
+# The project facts live in briefs/ (one checked brief per project); a project question gets only that brief's
+# relevant sections. Keep the one-line list in step with the Work list on naveenlabs.tech.
+BASE_PROMPT = (
+    "You are the chat assistant on naveenlabs.tech, a small AI model running locally on this personal site. Be clear "
+    "and friendly. Refuse anything harmful, illegal, sexual, hateful or dangerous, and scams, spam or messages "
+    "pretending to be a real company or person. Give no medical, legal or financial advice. Never claim to speak for "
+    "any company. If you are not sure of a fact, say so.\n"
+    "The site holds personal projects by Naveenkumar Dhamodharan, an Agentic AI Engineer: Trust "
+    "(trust.naveenlabs.tech, MCP tool security), Radar (radar.naveenlabs.tech, AI library upgrades), Blueprints "
+    "(blueprints.naveenlabs.tech, AI agent designs), TradFi (tradfi.naveenlabs.tech, stock trading, paper mode), Web3 "
+    "(web3.naveenlabs.tech, crypto bots, paper mode) and Chat (chat.naveenlabs.tech, you). About these, use only the "
+    "facts given; if they do not cover it, say you don't know and name the project's page. For every other topic, "
+    "answer from your own knowledge and never send people to naveenlabs.tech."
 )
-
-# A small local model knows nothing about this site, so without these facts it invents answers about it.
-# Keep in step with the Work list on naveenlabs.tech.
-SITE_FACTS = """
-How to answer:
-- General questions (history, literature, science, geography, coding, writing, maths): answer normally from your own knowledge.
-- Questions about naveenlabs.tech, its projects (Trust, Radar, Blueprints, Chat) or its owner: answer only from these facts.
-  If such a site question is not covered below, say you don't know and suggest visiting naveenlabs.tech.
-  For every other topic, never send people to naveenlabs.tech.
-Facts about naveenlabs.tech:
-- Owner: Naveenkumar Dhamodharan, an Agentic AI Engineer. He builds agentic AI systems (LangGraph orchestration, RAG,
-  MCP/A2A protocols) with production reliability. Contact and links: naveenlabs.tech.
-- Trust (trust.naveenlabs.tech): a security checker for MCP servers (the plug-ins that give an AI agent tools). You
-  paste a server's tool list and Trust shows what those tools could do on your machine before you install it, such as
-  hidden instructions, shell access and reading credential files. Nothing pasted is stored. Its Red Team
-  (trust.naveenlabs.tech/redteam) goes further: an agent attacks the tools in a sandbox with known attack patterns,
-  shows what got through with a replay, and re-tests a suggested fix; results are private and deleted after seven days.
-- Radar (radar.naveenlabs.tech): follows releases of the libraries AI apps are built on, publishes a digest, and checks
-  a dependency file (requirements.txt, package.json or a lock file) for breaking changes, deprecations and security
-  advisories between your versions and the latest.
-- Blueprints (blueprints.naveenlabs.tech): reference architectures for AI agents, each checked by a linter, priced per
-  month and kept current; you can compare two or draft a custom one. Its Architect (blueprints.naveenlabs.tech/architect)
-  is an agent: you describe an AI system in plain words, it asks a few questions, drafts a design, checks it with the
-  linter, red-teams and prices it, in about three minutes; designs are private and deleted after seven days.
-- Chat (chat.naveenlabs.tech): you, a small open model running on the owner's own server, with rate limits and
-  guardrails. No account, nothing saved.
-- All projects are independent personal projects, not affiliated with any company.
-"""
-SYSTEM_PROMPT = SYSTEM_PROMPT + "\n" + SITE_FACTS.strip()
+GROUNDING = ("Answer only from this brief. If it does not cover the question, say you don't know and point to the "
+             "project's page.\n")
+BRIEFS = load_briefs(Path(__file__).parent / "briefs")
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -123,6 +107,9 @@ _daily: dict[str, int] = {}        # "YYYY-MM-DD|ip" and "YYYY-MM-DD|*" -> count
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_MESSAGE_LEN)
+    project: Literal["trust", "radar", "blueprints", "tradfi", "web3", "chat"] | None = None   # the page's current project
+    section: Literal["intro", "architecture", "strengths", "intelligence"] | None = None
+    detail: bool = False
 
 
 def _client_ip(request: Request) -> str:
@@ -157,6 +144,16 @@ def _over_daily_cap(ip: str) -> bool:
     return False
 
 
+def _line(obj) -> str:
+    return json.dumps(obj) + "\n"
+
+
+def _answer(text: str, kind: str, project: str | None) -> Response:
+    """A whole answer in the stream format: one text line, then the done line."""
+    body = _line({"text": text}) + _line({"done": True, "kind": kind, "project": project})
+    return Response(body, media_type="application/x-ndjson")
+
+
 @app.post("/api/chat")
 def chat(req: ChatRequest, request: Request):
     ip = _client_ip(request)
@@ -165,36 +162,59 @@ def chat(req: ChatRequest, request: Request):
     if _over_daily_cap(ip):
         raise HTTPException(429, "Daily limit reached, come back tomorrow.")
     if _SELF_HARM.search(req.message):
-        return {"reply": SUPPORT}
+        return _answer(SUPPORT, "notice", None)
     if _BLOCKED.search(req.message):
-        return {"reply": REFUSAL}
+        return _answer(REFUSAL, "notice", None)
+
+    project = find_project(req.message, req.project)
+    if req.section and project:
+        return _answer(BRIEFS[project].section(req.section, req.detail), "brief", project)
+    ready = prepared(req.message, project, BRIEFS)
+    if ready is not None:
+        return _answer(ready, "brief", find_project(req.message, None))
+
     if not _slots.acquire(blocking=False):
         raise HTTPException(503, "Busy, try again in a few seconds.", headers={"Retry-After": "5"})
-
+    system = BASE_PROMPT + ("\n" + GROUNDING + model_context(project, req.message, BRIEFS) if project else "")
     payload = {
         "model": MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": req.message},
-        ],
-        "stream": False,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": req.message}],
+        "stream": True,
         "options": {"num_predict": MAX_REPLY_TOKENS, "num_thread": MODEL_THREADS},
     }
-    http_req = urllib.request.Request(
-        OLLAMA_URL,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-    )
+    http_req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode(),
+                                      headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(http_req, timeout=60) as resp:
-            data = json.loads(resp.read())
+        upstream = urllib.request.urlopen(http_req, timeout=60)    # opened here so an unreachable model is still a 503
     except Exception as exc:
+        _slots.release()
         raise HTTPException(503, "Model unavailable, try again shortly.") from exc
+    return StreamingResponse(_relay(upstream, project), media_type="application/x-ndjson")
+
+
+def _relay(upstream, project: str | None):
+    """Pass the model's chunks on as they come, screening the text so far; the slot is freed however it ends."""
+    text = ""
+    try:
+        with upstream:
+            for raw in upstream:
+                if not raw.strip():
+                    continue
+                data = json.loads(raw)
+                chunk = (data.get("message") or {}).get("content", "")
+                if chunk:
+                    text += chunk
+                    if _BLOCKED.search(text):
+                        yield _line({"replace": REFUSAL})
+                        break
+                    yield _line({"text": chunk})
+                if data.get("done"):
+                    break
+    except Exception:
+        yield _line({"error": "The model stopped answering. Try again in a minute."})
     finally:
         _slots.release()
-
-    reply = data["message"]["content"]
-    return {"reply": REFUSAL if _BLOCKED.search(reply) else reply}
+    yield _line({"done": True, "kind": "model", "project": project})
 
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
