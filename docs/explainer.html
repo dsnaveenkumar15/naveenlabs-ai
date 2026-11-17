@@ -378,29 +378,36 @@ _BLOCKED = re.compile(r<b>"""(?ix) \bphishing\b | \bransomware\b | ..."""</b>)</
   <!-- 6 — Grounding with a fact sheet -->
   <section class="slide" data-slide="6">
     <div class="slide-num">Grounding without a vector store</div>
-    <h1 class="slide-title">A small model invents, <span class="em">so it gets the facts</span></h1>
-    <p class="slide-lead">Asked about this site, a small model made up answers about its own projects. The fix is a short fact sheet sent with every question, with a rule for when to use it. No retrieval: the facts fit in the prompt.</p>
+    <h1 class="slide-title">A small model invents, <span class="em">so it gets checked briefs</span></h1>
+    <p class="slide-lead">Asked about this site, a small model made up answers about its own projects. The fix is one checked brief per project (intro, architecture, strengths, intelligence). An overview question gets the brief itself, with no model; any other project question gets the model with only that brief's relevant sections. No retrieval: six briefs need none.</p>
     <div class="card-grid two" style="align-items:start">
       <div class="stack-col">
-        <div class="ex-title">SITE_FACTS in chat-api/main.py (shortened)</div>
-        <div class="example">How to answer:
-- General questions: answer normally from your own knowledge.
-- Questions about naveenlabs.tech, its projects or its owner:
-  <b>answer only from these facts</b>. If not covered, say you
-  don't know. For every other topic, never send people
-  to naveenlabs.tech.
-Facts about naveenlabs.tech:
-- Trust (trust.naveenlabs.tech): a security checker for MCP servers ...
-- Radar (radar.naveenlabs.tech): follows releases of the libraries ...</div>
+        <div class="ex-title">chat-api/briefs/trust.md (shortened)</div>
+        <div class="example">## Intro
+Trust is a security checker for MCP servers ...
+&lt;!-- more --&gt;
+(the detailed form, for "More on ...")
+## Architecture
+...
+## Strengths
+...
+## Intelligence
+...
+
+Routing (chat-api/briefs.py):
+- "How is Trust built?"   -> the brief, <b>no model</b>
+- "Trust architecture"    -> that section, no model
+- "how is it tested?"     -> model + <b>this brief only</b>
+- anything else           -> model, general</div>
       </div>
       <div class="stack-col">
         <div class="card"><h3>Tests keep the facts honest</h3><ul>
-          <li>The model gets the fact sheet with every question.</li>
-          <li>The facts are scoped, so general questions are still answered.</li>
-          <li>The facts mention the Architect agent and the Red Team.</li>
-          <li>The private trading systems are never mentioned to visitors.</li>
+          <li>Every brief has the four sections in a short and a detailed form.</li>
+          <li>Card and overview questions never reach the model.</li>
+          <li>A project question gets only that project's brief, within 1,600 characters.</li>
+          <li>No brief or prompt names a broker, an exchange, a server address or a private tool.</li>
         </ul></div>
-        <div class="why"><strong>Trade-off</strong>The fact sheet must be updated by hand when the site's project list changes, and it makes every prompt longer, which costs seconds on a CPU.</div>
+        <div class="why"><strong>Trade-off</strong>The briefs are kept in step by hand when a project changes. In exchange, overview answers are instant and exact, and the model reads about 400 tokens instead of the whole site.</div>
       </div>
     </div>
   </section>
@@ -463,7 +470,7 @@ Facts about naveenlabs.tech:
         <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Whole site</span><span>1,000 a day (UTC)</span></div>
         <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">At once</span><span>2; others get 503, retry in 5 s</span></div>
         <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Question</span><span>1,000 characters</span></div>
-        <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Reply</span><span>300 tokens</span></div>
+        <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Reply</span><span>600 tokens, streamed</span></div>
         <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Model call</span><span>60 s timeout</span></div>
         <div class="metric-row" style="--cols: 1.3fr 1fr"><span class="m">Visitor identity</span><span>rightmost X-Forwarded-For</span></div>
       </div>

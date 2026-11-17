@@ -18,8 +18,9 @@ Open the private tools with `ssh -L 5678:127.0.0.1:5678 -L 3000:127.0.0.1:3000 r
 public hostname (other products' names and admin logins; see the hosting-policy rules).
 
 **Chat's look:** its own "soft conversational" theme in `chat-api/static/` (lavender, DM Sans, speech-bubble mark,
-soft filled icons in `icons.svg`), light by default with the shared light/dark toggle. One column: greeting, question
-cards by topic, the conversation, a pill composer that stays in view, a three-dot typing indicator.
+soft filled icons in `icons.svg`), light by default with the shared light/dark toggle. One column: greeting, a pill composer
+pinned at the top, six project cards (they fold away once a chat starts, a "Projects" button brings them back),
+then the conversation; answers render headings and lists from a small Markdown subset, never as HTML.
 `chat-api/test_page.py` checks tokens, contrast, budgets and markup.
 
 ## Why Chat is a separate service instead of exposing Ollama
@@ -28,7 +29,7 @@ Ollama's API has no authentication and no limits. `chat-api/main.py` is the only
 
 - **Limits:** 10 requests per minute per visitor, 50 per visitor per day, 1,000 per day for the whole site
   (`CHAT_DAILY_PER_VISITOR`, `CHAT_DAILY_TOTAL`), at most 2 generations at once (`CHAT_MAX_CONCURRENT`, others get
-  503 with `Retry-After`), replies capped at 300 tokens, questions at 1,000 characters.
+  503 with `Retry-After`), replies capped at 600 tokens and streamed, questions at 1,000 characters.
 - **Guardrails:** a topic screen on the question and on the reply (weapons, malware, phishing and scams, drugs,
   sexual content); self-harm questions get a supportive reply with the Tele-MANAS helpline (14416); a system prompt
   that refuses harmful requests, gives no medical, legal or financial advice and never claims to speak for a company.
@@ -51,9 +52,14 @@ Chat runs **gemma3:4b** (Google, open weights, ~3.3 GB). Chosen on 2026-10-04 by
 | llama3.2:3b | 4.2 s | mixed |
 | **gemma3:4b** | 4.7 s | all correct |
 
-- **Site facts:** a small model knows nothing about naveenlabs.tech and invents answers about it, so `SITE_FACTS` in
-  `chat-api/main.py` is sent with every question (projects, owner, and the rule: site questions only from these
-  facts, general questions answered normally). **Update it whenever the landing page's Work list changes.**
+- **Project briefs:** a small model knows nothing about naveenlabs.tech and invents answers about it, so each
+  project has a checked brief in `chat-api/briefs/` (intro, architecture, strengths, intelligence; a short and a
+  detailed form). `chat-api/briefs.py` routes a question: an overview question or a card gets the brief with no
+  model; another project question gets the model with only that brief's relevant sections (at most 1,600
+  characters, so the first words come quickly); anything else gets the model with the short `BASE_PROMPT`.
+  **When a project's ARCHITECTURE.md changes, re-check its brief against it; keep `BASE_PROMPT`'s project list in
+  step with the landing page's Work list.** Never put a broker or exchange brand, a server address or a private
+  tool in a brief (a test checks).
 - **CPU:** a reply used all 4 cores, starving the trading apps, so Ollama is capped at `cpus: "3.0"` and the model
   runs with `num_thread: 3` (`CHAT_MODEL_THREADS`). Typical replies take 7-10 s, long ones about 15 s.
 - **Memory:** 6 GB cap (gemma ~3.6 GB loaded plus Radar's `nomic-embed-text`; at 4 GB, two loaded models were killed).
@@ -69,7 +75,7 @@ chat-api runs as a non-root user with a read-only filesystem, all Linux capabili
 ```powershell
 cd chat-api
 python -m pip install -r requirements-dev.txt   # the app's pins plus pytest and httpx
-python -m pytest -q        # limits, guardrails, daily caps, self-harm reply, headers, health check, page theme and markup
+python -m pytest -q        # briefs and routing, streaming, limits, guardrails, daily caps, self-harm reply, headers, page theme and markup
 ```
 
 ## Deploy (VPS)
@@ -104,7 +110,7 @@ flowchart LR
     subgraph api_inside["chat-api, per question"]
         direction TB
         limits["rate limits, daily caps,<br/>2 at once"] --> screen["topic screen<br/>on the question"]
-        screen --> prompt["system prompt +<br/>SITE_FACTS"]
+        screen --> prompt["brief (no model) or<br/>prompt + one brief"]
         prompt --> reply_screen["topic screen<br/>on the reply"]
     end
     api --> api_inside
