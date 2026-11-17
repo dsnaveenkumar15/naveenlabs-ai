@@ -245,3 +245,23 @@ def test_no_prompt_names_brands_hosts_or_private_tools(monkeypatch):
     assert len(seen) == 4
     for payload in seen:
         assert banned_in(payload["messages"][0]["content"]) == []
+
+
+def test_a_general_question_after_a_brief_is_not_boxed_into_it(monkeypatch):
+    # The page sends the last project with every question; an unrelated question must still be answered normally.
+    seen = reset(monkeypatch)
+    post({"message": "What's the capital of France?", "project": "trust"})
+    system = seen[0]["messages"][0]["content"]
+    assert "Otherwise answer from your own knowledge" in system and "If the question is about Trust" in system
+
+
+def test_an_ollama_error_line_mid_stream_reaches_the_visitor(monkeypatch):
+    class ErrorStream(FakeStream):
+        def __iter__(self):
+            yield (json.dumps({"message": {"content": "par"}, "done": False}) + "\n").encode()
+            yield (json.dumps({"error": "model runner has unexpectedly stopped"}) + "\n").encode()
+    reset(monkeypatch, slots=1)
+    monkeypatch.setattr(main.urllib.request, "urlopen", lambda *a, **k: ErrorStream([]))
+    out = lines(post({"message": "hello"}))
+    assert out[0] == {"text": "par"} and "error" in out[1] and out[-1]["done"] is True
+    assert main._slots.acquire(blocking=False)

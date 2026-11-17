@@ -191,3 +191,7 @@ def test_typing_indicator_replaces_the_thinking_text():
     assert "Thinking" not in JS and 'className = "typing"' in JS and "Chat is typing" in JS
     motion = CSS.split(MOTION)[1]
     assert ".typing i" in motion and "@keyframes" in motion
+
+
+def test_an_empty_answer_never_leaves_a_blank():
+    assert "No answer came back" in JS and "errorShown" in JS

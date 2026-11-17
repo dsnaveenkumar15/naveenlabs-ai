@@ -134,6 +134,7 @@ async function ask(body) {
   let pending = addTyping();
   let bubble = null;
   let text = "";
+  let errorShown = false;
   const paint = () => {
     if (pending) { pending.remove(); pending = null; }
     if (!bubble) bubble = addAnswer();
@@ -174,11 +175,13 @@ async function ask(body) {
         else if (typeof msg.error === "string") {
           if (pending) { pending.remove(); pending = null; }
           addMessage(msg.error, "msg-error");
+          errorShown = true;
         } else if (msg.done) done = msg;
       }
       if (end) break;
     }
     if (pending) pending.remove();
+    if (!text && !errorShown) addMessage("No answer came back. Try again in a minute.", "msg-error");
     if (done && done.project) currentProject = done.project;
     if (done && done.kind === "brief" && !body.detail && done.project) addMoreButtons(done.project);
   } catch (err) {

@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from briefs import find_project, load_briefs, model_context, prepared
+from briefs import NAMES, find_project, load_briefs, model_context, prepared
 
 MODEL = os.environ.get("CHAT_MODEL", "gemma3:4b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434/api/chat")
@@ -73,8 +73,10 @@ BASE_PROMPT = (
     "facts given; if they do not cover it, say you don't know and name the project's page. For every other topic, "
     "answer from your own knowledge and never send people to naveenlabs.tech."
 )
-GROUNDING = ("Answer only from this brief. If it does not cover the question, say you don't know and point to the "
-             "project's page.\n")
+# Conditional: the page sends the last project with every question, so an unrelated question ("capital of France?")
+# must not be boxed into the brief.
+GROUNDING = ("If the question is about {name}: Answer only from this brief, and if it does not cover the question, "
+             "say you don't know and point to the project's page. Otherwise answer from your own knowledge.\n")
 BRIEFS = load_briefs(Path(__file__).parent / "briefs")
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -175,7 +177,8 @@ def chat(req: ChatRequest, request: Request):
 
     if not _slots.acquire(blocking=False):
         raise HTTPException(503, "Busy, try again in a few seconds.", headers={"Retry-After": "5"})
-    system = BASE_PROMPT + ("\n" + GROUNDING + model_context(project, req.message, BRIEFS) if project else "")
+    system = BASE_PROMPT + ("\n" + GROUNDING.format(name=NAMES[project]) + model_context(project, req.message, BRIEFS)
+                            if project else "")
     payload = {
         "model": MODEL,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": req.message}],
@@ -201,6 +204,8 @@ def _relay(upstream, project: str | None):
                 if not raw.strip():
                     continue
                 data = json.loads(raw)
+                if data.get("error"):           # Ollama reports a failure mid-stream as a line, with HTTP 200
+                    raise RuntimeError(data["error"])
                 chunk = (data.get("message") or {}).get("content", "")
                 if chunk:
                     text += chunk
