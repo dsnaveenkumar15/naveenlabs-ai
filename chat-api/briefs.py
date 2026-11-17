@@ -68,11 +68,32 @@ def load_briefs(directory: Path) -> dict:
     return {project: _parse(Path(directory) / f"{project}.md") for project in PROJECTS}
 
 
-def find_project(message: str, current: str | None) -> str | None:
-    match = _ALIAS_RE.search(message)
-    if match:
-        return dict(ALIASES)[match.group(1).lower()]
+# Everyday words that are also project names: written in lower case they name the project only when the rest of the
+# question shares a word with its brief ("how is trust tested?"), never on their own ("Can I trust you?").
+EVERYDAY = frozenset({"trust", "radar", "chat"})
+
+
+def find_project(message: str, current: str | None, briefs: dict | None = None) -> str | None:
+    for match in _ALIAS_RE.finditer(message):
+        word = match.group(1)
+        project = dict(ALIASES)[word.lower()]
+        if word.lower() not in EVERYDAY or not word.islower():
+            return project
+        rest = message[:match.start()] + message[match.end():]
+        if briefs and relevance(project, rest, briefs):
+            return project
     return current if current in PROJECTS else None
+
+
+def route(message: str, current: str | None, section: str | None, briefs: dict) -> str | None:
+    """The project a question is about: the one it names, else the page's current project when the question asks for
+    a section or shares a meaningful word with that brief; None means a general question."""
+    named = find_project(message, None, briefs)
+    if named:
+        return named
+    if current in PROJECTS and (section or relevance(current, message, briefs)):
+        return current
+    return None
 
 
 def facts(project: str, briefs: dict) -> str:
@@ -97,7 +118,11 @@ every only over such much many here know tell explain describe please thanks tha
 
 
 def _stem(word: str) -> str:
-    return word[:-1] if len(word) > 4 and word.endswith("s") and not word.endswith("ss") else word
+    """A light stem so tests, tested and testing meet: drops -ing, -ed or -s when at least 4 letters remain."""
+    for ending in ("ing", "ed", "s"):
+        if word.endswith(ending) and not word.endswith("ss") and len(word) - len(ending) >= 4:
+            return word[:-len(ending)]
+    return word
 
 
 def _words(text: str) -> set:

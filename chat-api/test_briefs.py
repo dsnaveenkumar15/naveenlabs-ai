@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from briefs import CONTEXT_CHARS, banned_in, best_section, facts, invented_numbers, relevance, PROJECTS, find_project, load_briefs
+from briefs import CONTEXT_CHARS, banned_in, best_section, facts, invented_numbers, relevance, route, PROJECTS, find_project, load_briefs, _words
 
 HEADINGS = {"intro": "Intro", "architecture": "Architecture", "strengths": "Strengths", "intelligence": "Intelligence"}
 
@@ -140,3 +140,37 @@ def test_finance_briefs_say_paper_mode():
 def test_relevance_ignores_common_words(briefs_long):
     assert relevance("trust", "What is the capital of Japan?", briefs_long) == 0
     assert relevance("trust", "which model scores the attacks?", briefs_long) > 0
+
+
+LOADED = load_briefs(REAL)
+
+
+@pytest.mark.parametrize("message,expected", [
+    ("Can I trust you?", None), ("Let's chat", None), ("What is a weather radar?", None),
+    ("how is trust tested?", "trust"), ("how does radar collect releases?", "radar"), ("Trust", "trust")])
+def test_everyday_words_only_name_a_project_when_the_question_is_about_it(message, expected):
+    assert find_project(message, None, LOADED) == expected
+
+
+def test_words_match_across_common_endings():
+    assert _words("testing tested tests guarded guards") == {"test", "guard"}
+
+
+def test_route_keeps_the_current_project_only_for_a_related_question():
+    assert route("how is it tested?", "radar", None, LOADED) == "radar"
+    assert route("What is the capital of Japan?", "radar", None, LOADED) is None
+    assert route("anything", "radar", "strengths", LOADED) == "radar"
+    assert route("and how is Web3 tested?", "radar", None, LOADED) == "web3"
+
+
+def test_every_card_question_reaches_its_project():
+    html = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+    cards = re.findall(r'<button type="button" class="starter" data-project="(\w+)">([^<]+)</button>', html)
+    assert len(cards) == 12
+    for project, question in cards:
+        assert route(question, project, None, LOADED) == project, question
+
+
+def test_trust_brief_says_how_the_code_guard_works():
+    text = facts("trust", LOADED)
+    assert "strips the suspect text" in text and "ext_" in text and "untrusted content" in text

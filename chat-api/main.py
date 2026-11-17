@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from briefs import HEADINGS, NAMES, best_section, facts, find_project, invented_numbers, load_briefs, relevance
+from briefs import HEADINGS, NAMES, best_section, facts, invented_numbers, load_briefs, route
 
 MODEL = os.environ.get("CHAT_MODEL", "gemma3:4b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434/api/chat")
@@ -173,12 +173,7 @@ def chat(req: ChatRequest, request: Request):
     if _BLOCKED.search(req.message):
         return _answer(REFUSAL, "notice", None)
 
-    project = find_project(req.message, req.project)
-    # The page sends the last project with every question; one that names no project and shares no meaningful word
-    # with that brief ("capital of Japan?") is a general question, so the brief is left out.
-    if project and req.section is None and find_project(req.message, None) is None \
-            and relevance(project, req.message, BRIEFS) == 0:
-        project = None
+    project = route(req.message, req.project, req.section, BRIEFS)
     if req.brief and project:
         return _answer(BRIEFS[project].full(), "brief", project)
 

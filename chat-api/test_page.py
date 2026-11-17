@@ -124,7 +124,7 @@ def test_home_is_greeting_composer_projects_conversation():
     assert [k for k, _ in cards] == ["trust", "radar", "blueprints", "tradfi", "web3", "chat"]
     assert all(body.count('class="starter"') == 2 and "built?" in body for _, body in cards)
     assert all(f'data-project="{k}"' in body for k, body in cards)
-    assert all(body.count("data-section=") == 1 for _, body in cards)      # the second question shows a prepared section
+    assert all("data-section=" not in body for _, body in cards)          # the card's own question goes to the model
     assert 'role="log"' in HTML and 'aria-live="polite"' in HTML
 
 
@@ -203,3 +203,15 @@ def test_project_answers_offer_the_checked_brief():
 
 def test_the_wait_is_explained_while_the_model_reads():
     assert "can take up to a minute" in JS
+
+
+def test_screen_readers_hear_the_answer_once_it_is_complete():
+    assert 'setAttribute("aria-busy", "true")' in JS and 'removeAttribute("aria-busy")' in JS
+
+
+def test_buttons_are_disabled_while_an_answer_is_coming():
+    assert 'querySelectorAll(".starter, .more-btn")' in JS and "setBusy(true)" in JS and "setBusy(false)" in JS
+
+
+def test_only_typed_questions_return_focus_to_the_input():
+    assert "if (!from) input.focus()" in JS and "preventScroll: true" in JS

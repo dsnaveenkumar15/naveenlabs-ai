@@ -107,7 +107,7 @@ function addFollowUps(project, withMore) {
     button.type = "button";
     button.className = "more-btn";
     button.textContent = label;
-    button.addEventListener("click", () => ask(body));
+    button.addEventListener("click", () => ask(body, button));
     row.appendChild(button);
   };
   if (withMore) for (const [section, label] of MORE) add(label, { message: label, project, section, detail: true });
@@ -131,13 +131,24 @@ if (showProjects) {
 
 // --- asking: the answer arrives as NDJSON lines (text chunks, replace, error, then done) ---
 
-async function ask(body) {
+// While an answer is coming every way to ask is disabled, and the conversation is marked busy so screen readers
+// read the answer once it is complete instead of after every chunk.
+function setBusy(state) {
+  busy = state;
+  input.disabled = state;
+  sendBtn.disabled = state;
+  document.querySelectorAll(".starter, .more-btn").forEach((button) => { button.disabled = state; });
+  if (state) windowEl.setAttribute("aria-busy", "true");
+  else windowEl.removeAttribute("aria-busy");
+}
+
+// `from` is the button that asked; a typed question returns focus to the input, a button keeps it (no keyboard
+// popping up on phones, no jump back to the top).
+async function ask(body, from) {
   if (busy) return;
-  busy = true;
+  setBusy(true);
   foldProjects();
   addMessage(body.message, "msg-user");
-  input.disabled = true;
-  sendBtn.disabled = true;
   let pending = addTyping();
   let bubble = null;
   let text = "";
@@ -195,18 +206,15 @@ async function ask(body) {
     if (pending) pending.remove();
     addMessage("The model could not be reached. Check your connection and try again.", "msg-error");
   } finally {
-    busy = false;
-    input.disabled = false;
-    sendBtn.disabled = false;
-    input.focus();
+    setBusy(false);
+    if (!from) input.focus();
+    else if (from.isConnected && from.offsetParent) from.focus({ preventScroll: true });
   }
 }
 
 document.querySelectorAll(".starter").forEach((button) => {
   button.addEventListener("click", () => {
-    const body = { message: button.textContent, project: button.dataset.project };
-    if (button.dataset.section) { body.section = button.dataset.section; body.detail = true; }
-    ask(body);
+    ask({ message: button.textContent, project: button.dataset.project }, button);
   });
 });
 

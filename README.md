@@ -54,7 +54,9 @@ Chat runs **gemma3:4b** (Google, open weights, ~3.3 GB). Chosen on 2026-10-04 by
 
 - **Project briefs:** a small model knows nothing about naveenlabs.tech and invents answers about it, so each
   project has a checked brief in `chat-api/briefs/` (intro, architecture, strengths, intelligence; a short and a
-  detailed form). A project question (it names a project, or follows up on the last brief shown) gets the model
+  detailed form). A project question (it names a project, or follows up on the last project with a word its brief
+  shares; the everyday words trust, radar and chat name a project only when written as a name or when the rest of
+  the question is about it, so "Can I trust you?" stays general) gets the model
   with that project's whole brief in detailed form, `PROJECT_PROMPT`'s strict rules and temperature 0; code then
   checks every number in the answer against the brief and replaces the answer with the checked section if one is
   not there. Anything else gets the model with the short `BASE_PROMPT`. "Show the checked brief" returns the brief
