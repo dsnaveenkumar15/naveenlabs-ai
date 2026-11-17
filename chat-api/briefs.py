@@ -102,8 +102,19 @@ def prepared(message: str, project: str | None, briefs: dict) -> str | None:
     return None
 
 
+_COMMON = frozenset("""what when where which while does have with this that from your about there their they them then
+than these those will would could should into more most some also just like make made very been were being other each
+every only over such much many here know tell explain describe please thanks thank good best work works""".split())
+
+
 def _words(text: str) -> set:
-    return {word for word in re.findall(r"[a-z0-9]+", text.lower()) if len(word) > 3}
+    return {word for word in re.findall(r"[a-z0-9]+", text.lower()) if len(word) > 3 and word not in _COMMON}
+
+
+def relevance(project: str, message: str, briefs: dict) -> int:
+    """How many meaningful words the question shares with the project's brief: 0 means it is not about the project."""
+    brief = briefs[project]
+    return len(_words(message) & _words(" ".join(s.short + " " + s.detail for s in brief.sections.values())))
 
 
 def model_context(project: str, message: str, briefs: dict) -> str:

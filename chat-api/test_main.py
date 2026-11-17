@@ -250,9 +250,12 @@ def test_no_prompt_names_brands_hosts_or_private_tools(monkeypatch):
 def test_a_general_question_after_a_brief_is_not_boxed_into_it(monkeypatch):
     # The page sends the last project with every question; an unrelated question must still be answered normally.
     seen = reset(monkeypatch)
-    post({"message": "What's the capital of France?", "project": "trust"})
+    out = lines(post({"message": "What's the capital of France?", "project": "trust"}))
     system = seen[0]["messages"][0]["content"]
-    assert "Otherwise answer from your own knowledge" in system and "If the question is about Trust" in system
+    assert "Trust:" not in system and "If the question is about" not in system and out[-1]["project"] is None
+    seen.clear()
+    post({"message": "how is it tested?", "project": "trust"})            # a real follow-up still gets the brief
+    assert "Trust:" in seen[0]["messages"][0]["content"]
 
 
 def test_an_ollama_error_line_mid_stream_reaches_the_visitor(monkeypatch):

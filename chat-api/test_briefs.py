@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from briefs import CONTEXT_CHARS, banned_in, PROJECTS, find_project, load_briefs, model_context, prepared
+from briefs import CONTEXT_CHARS, banned_in, relevance, PROJECTS, find_project, load_briefs, model_context, prepared
 
 HEADINGS = {"intro": "Intro", "architecture": "Architecture", "strengths": "Strengths", "intelligence": "Intelligence"}
 
@@ -135,3 +135,8 @@ def test_finance_briefs_say_paper_mode():
     briefs = load_briefs(REAL)
     for project in ("tradfi", "web3"):
         assert "paper" in briefs[project].full().lower(), project
+
+
+def test_relevance_ignores_common_words(briefs_long):
+    assert relevance("trust", "What is the capital of Japan?", briefs_long) == 0
+    assert relevance("trust", "which model scores the attacks?", briefs_long) > 0
