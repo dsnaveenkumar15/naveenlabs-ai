@@ -90,21 +90,28 @@ function addTyping() {
   const label = document.createElement("span");
   label.className = "visually-hidden";
   label.textContent = "Chat is typing";
-  el.append(dots, label);
+  const hint = document.createElement("span");
+  hint.className = "typing-hint";
+  hint.setAttribute("aria-hidden", "true");
+  hint.textContent = "A small model on a small server: an answer can take up to a minute.";
+  el.append(dots, label, hint);
   return show(el);
 }
 
-function addMoreButtons(project) {
+// Under a project answer: deeper questions for the model, and the checked brief the answer was written from.
+function addFollowUps(project, withMore) {
   const row = document.createElement("div");
   row.className = "more";
-  for (const [section, label] of MORE) {
+  const add = (label, body) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "more-btn";
     button.textContent = label;
-    button.addEventListener("click", () => ask({ message: label, project, section, detail: true }));
+    button.addEventListener("click", () => ask(body));
     row.appendChild(button);
-  }
+  };
+  if (withMore) for (const [section, label] of MORE) add(label, { message: label, project, section, detail: true });
+  add("Show the checked brief", { message: "Show the checked brief", project, brief: true });
   show(row);
 }
 
@@ -183,7 +190,7 @@ async function ask(body) {
     if (pending) pending.remove();
     if (!text && !errorShown) addMessage("No answer came back. Try again in a minute.", "msg-error");
     if (done && done.project) currentProject = done.project;
-    if (done && done.kind === "brief" && !body.detail && done.project) addMoreButtons(done.project);
+    if (done && done.grounded && done.project && text) addFollowUps(done.project, !body.section);
   } catch (err) {
     if (pending) pending.remove();
     addMessage("The model could not be reached. Check your connection and try again.", "msg-error");

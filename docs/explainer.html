@@ -379,7 +379,7 @@ _BLOCKED = re.compile(r<b>"""(?ix) \bphishing\b | \bransomware\b | ..."""</b>)</
   <section class="slide" data-slide="6">
     <div class="slide-num">Grounding without a vector store</div>
     <h1 class="slide-title">A small model invents, <span class="em">so it gets checked briefs</span></h1>
-    <p class="slide-lead">Asked about this site, a small model made up answers about its own projects. The fix is one checked brief per project (intro, architecture, strengths, intelligence). Every project question is answered from the brief itself, with no model: an overview gets the whole brief, any other question the section that matches it best. The model, which mixed up facts even with a brief in its prompt, answers only general questions.</p>
+    <p class="slide-lead">Asked about this site, a small model made up answers about its own projects. The fix is one checked brief per project (intro, architecture, strengths, intelligence). A project question gets the model with that project's whole brief, strict rules and temperature 0; code then checks every number in the answer against the brief and falls back to the checked section if one is not there.</p>
     <div class="card-grid two" style="align-items:start">
       <div class="stack-col">
         <div class="ex-title">chat-api/briefs/trust.md (shortened)</div>
@@ -395,19 +395,20 @@ Trust is a security checker for MCP servers ...
 ...
 
 Routing (chat-api/briefs.py):
-- "How is Trust built?"   -> the brief, <b>no model</b>
-- "Trust architecture"    -> that section, no model
-- "how is it tested?"     -> best-matching section
+- "How is Trust built?"   -> model + <b>whole Trust brief</b>
+- "how is it tested?"     -> same, last project shown
+- answer has a number the brief lacks
+                          -> <b>checked section instead</b>
 - anything else           -> model, general</div>
       </div>
       <div class="stack-col">
         <div class="card"><h3>Tests keep the facts honest</h3><ul>
           <li>Every brief has the four sections in a short and a detailed form.</li>
-          <li>Card and overview questions never reach the model.</li>
-          <li>A typed project question gets the best-matching section; only general questions reach the model.</li>
+          <li>A project question gets that project's whole brief, at temperature 0.</li>
+          <li>An answer with a number the brief does not hold is replaced by the checked section.</li>
           <li>No brief or prompt names a broker, an exchange, a server address or a private tool.</li>
         </ul></div>
-        <div class="why"><strong>Trade-off</strong>The briefs are kept in step by hand when a project changes. In exchange, every project answer is instant and exact; the price is prepared text rather than a reply written for the exact question.</div>
+        <div class="why"><strong>Trade-off</strong>The briefs are kept in step by hand when a project changes. Reading the whole brief costs about 15 to 20 seconds before the first word; the owner chose correct over fast.</div>
       </div>
     </div>
   </section>

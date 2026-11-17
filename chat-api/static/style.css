@@ -67,6 +67,7 @@ a { color: var(--ink); }
 .msg-error { align-self: flex-start; background: var(--bad-soft); color: var(--bad); border-bottom-left-radius: 6px; }
 .typing { display: inline-flex; align-items: center; gap: 5px; height: 22px; }
 .typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.typing-hint { display: block; margin-top: 6px; font-size: 13px; color: var(--muted); }
 .composer { position: sticky; top: 72px; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 8px; background: var(--surface); border: 1px solid var(--rule-2); border-radius: 999px; box-shadow: var(--shadow-2); }
 /* A ring of page colour hides the conversation scrolling under the pinned composer. */
 .composer { box-shadow: 0 0 0 14px var(--bg), var(--shadow-2); }

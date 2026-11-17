@@ -131,12 +131,12 @@ def test_daily_cap_for_the_whole_site(monkeypatch):
     assert codes == [200, 200, 429]
 
 
-def test_prepared_answers_count_toward_the_daily_cap(monkeypatch):
+def test_brief_links_count_toward_the_daily_cap(monkeypatch):
     seen = reset(monkeypatch, trust_proxy=True)
     monkeypatch.setattr(main, "RATE_LIMIT", 10_000)
     monkeypatch.setattr(main, "DAILY_PER_VISITOR", 50)
     h = {"x-forwarded-for": "1.1.1.1"}
-    codes = [post({"message": "How is Trust built?", "project": "trust"}, h).status_code for _ in range(51)]
+    codes = [post({"message": "Show the checked brief", "project": "trust", "brief": True}, h).status_code for _ in range(51)]
     assert codes[:50] == [200] * 50 and codes[50] == 429 and seen == []
 
 
@@ -163,47 +163,60 @@ def test_pages_and_api_carry_security_headers(monkeypatch):
 
 # --- briefs, routing and streaming ---
 
-def test_card_question_is_answered_from_the_brief_without_the_model(monkeypatch):
-    seen = reset(monkeypatch)
-    r = post({"message": "How is Trust built?", "project": "trust"})
-    out = lines(r)
-    assert seen == [] and r.headers["content-type"].startswith("application/x-ndjson")
-    assert out[0]["text"] == main.BRIEFS["trust"].full() and out[-1] == {"done": True, "kind": "brief", "project": "trust"}
+def system_of(seen):
+    return seen[0]["messages"][0]["content"]
 
 
-def test_typed_overview_question_gets_the_brief(monkeypatch):
-    seen = reset(monkeypatch)
-    out = lines(post({"message": "tell me about Web3"}))
-    assert seen == [] and out[0]["text"] == main.BRIEFS["web3"].full() and out[-1]["project"] == "web3"
+def test_card_question_is_answered_by_the_model_from_the_whole_brief(monkeypatch):
+    seen = reset(monkeypatch, chunks=["Trust is ", "built from two containers."])
+    out = lines(post({"message": "How is Trust built?", "project": "trust"}))
+    system = system_of(seen)
+    assert answer(post({"message": "How is Trust built?", "project": "trust"})) == "Trust is built from two containers."
+    assert main.facts("trust", main.BRIEFS) in system and "Use ONLY the facts below" in system
+    assert all(main.BRIEFS[other].sections["intro"].detail not in system for other in main.BRIEFS if other != "trust")
+    assert seen[0]["options"]["temperature"] == 0 and seen[0]["stream"] is True
+    assert out[-1] == {"done": True, "kind": "model", "project": "trust", "grounded": True}
 
 
-def test_more_button_returns_the_detailed_section(monkeypatch):
-    seen = reset(monkeypatch)
-    out = lines(post({"message": "More on the architecture", "project": "trust", "section": "architecture", "detail": True}))
-    assert seen == [] and out[0]["text"] == main.BRIEFS["trust"].section("architecture", detail=True)
-    assert out[-1] == {"done": True, "kind": "brief", "project": "trust"}
-
-
-def test_typed_project_question_gets_the_best_matching_section_without_the_model(monkeypatch):
-    # gemma3:4b got project facts wrong even from the brief (2026-11-17 live check), so the owner chose: answer a
-    # typed project question with the prepared section that matches it best.
+def test_typed_project_question_goes_to_the_model_with_that_brief(monkeypatch):
     seen = reset(monkeypatch)
     out = lines(post({"message": "How does the Trust code guard stop an attack?"}))
-    assert seen == [] and out[-1] == {"done": True, "kind": "brief", "project": "trust"}
-    assert out[0]["text"].startswith("# Trust") and "## Strengths" in out[0]["text"] and "0 of 178" in out[0]["text"]
+    assert "FACTS ABOUT Trust" in system_of(seen) and out[-1]["project"] == "trust" and out[-1]["grounded"] is True
+
+
+def test_more_button_asks_the_model_for_that_section_in_detail(monkeypatch):
+    seen = reset(monkeypatch)
+    lines(post({"message": "More on the architecture", "project": "trust", "section": "architecture", "detail": True}))
+    assert "FACTS ABOUT Trust" in system_of(seen)
+    assert seen[0]["messages"][1]["content"] == "Explain the architecture of Trust in detail."
+
+
+def test_show_the_checked_brief_returns_it_without_the_model(monkeypatch):
+    seen = reset(monkeypatch)
+    out = lines(post({"message": "Show the checked brief", "project": "web3", "brief": True}))
+    assert seen == [] and out[0]["text"] == main.BRIEFS["web3"].full()
+    assert out[-1] == {"done": True, "kind": "brief", "project": "web3"}
+
+
+def test_an_answer_with_a_number_not_in_the_brief_is_replaced_by_the_checked_section(monkeypatch):
+    reset(monkeypatch, chunks=["The guard stopped ", "0 of 999 attacks."])
+    out = lines(post({"message": "How does the Trust code guard stop an attack?"}))
+    replaced = [o["replace"] for o in out if "replace" in o]
+    assert len(replaced) == 1 and "999" not in replaced[0] and "not in the checked brief" in replaced[0]
+    assert "## Strengths" in replaced[0] and "0 of 178" in replaced[0]
 
 
 def test_general_questions_stream_without_a_brief(monkeypatch):
     seen = reset(monkeypatch)
     out = lines(post({"message": "What is photosynthesis?"}))
-    assert out[-1] == {"done": True, "kind": "model", "project": None}
-    assert "Answer only from this brief" not in seen[0]["messages"][0]["content"]
+    assert out[-1] == {"done": True, "kind": "model", "project": None, "grounded": False}
+    assert system_of(seen) == main.BASE_PROMPT
 
 
 def test_follow_up_uses_the_project_the_page_sends(monkeypatch):
     seen = reset(monkeypatch)
     out = lines(post({"message": "how is it tested?", "project": "radar"}))
-    assert seen == [] and out[-1] == {"done": True, "kind": "brief", "project": "radar"} and "## Strengths" in out[0]["text"]
+    assert "FACTS ABOUT Radar" in system_of(seen) and out[-1]["project"] == "radar"
 
 
 def test_unknown_project_or_section_is_rejected(monkeypatch):
@@ -230,17 +243,18 @@ def test_the_general_prompt_lists_every_project_and_stays_short(monkeypatch):
 
 
 def test_tradfi_and_web3_briefs_are_used(monkeypatch):
-    reset(monkeypatch)
-    for project, name in (("tradfi", "TradFi"), ("web3", "Web3")):
-        out = lines(post({"message": f"How is {name} built?"}))
-        assert out[0]["text"].startswith(f"# {name}") and out[-1]["project"] == project
+    seen = reset(monkeypatch)
+    for name in ("TradFi", "Web3"):
+        post({"message": f"How is {name} built?"})
+    assert [f"FACTS ABOUT {n}" in p["messages"][0]["content"] for p, n in zip(seen, ("TradFi", "Web3"))] == [True, True]
 
 
 def test_no_prompt_names_brands_hosts_or_private_tools(monkeypatch):
     seen = reset(monkeypatch)
-    for body in ({"message": "What is photosynthesis?"}, {"message": "Write a haiku about rain"}):
+    for body in ({"message": "What is photosynthesis?"}, {"message": "How does TradFi place an order?"},
+                 {"message": "how does it settle orders?", "project": "web3"}, {"message": "How is Chat built?"}):
         post(body)
-    assert len(seen) == 2
+    assert len(seen) == 4
     for payload in seen:
         assert banned_in(payload["messages"][0]["content"]) == []
 
@@ -249,8 +263,7 @@ def test_a_general_question_after_a_brief_is_not_boxed_into_it(monkeypatch):
     # The page sends the last project with every question; an unrelated question must still be answered normally.
     seen = reset(monkeypatch)
     out = lines(post({"message": "What's the capital of France?", "project": "trust"}))
-    assert len(seen) == 1 and out[-1] == {"done": True, "kind": "model", "project": None}
-    assert seen[0]["messages"][0]["content"] == main.BASE_PROMPT
+    assert system_of(seen) == main.BASE_PROMPT and out[-1]["project"] is None
 
 
 def test_an_ollama_error_line_mid_stream_reaches_the_visitor(monkeypatch):

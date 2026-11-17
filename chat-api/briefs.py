@@ -1,5 +1,5 @@
-"""Project briefs: checked, sectioned Markdown about each project, and the routing that decides whether a question
-gets a prepared brief (instant, nothing invented) or a short model context built from one brief."""
+"""Project briefs: checked, sectioned Markdown about each project. The model answers project questions from the whole
+brief (facts), and code checks every number in its answer against the brief (invented_numbers)."""
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,14 +28,6 @@ ALIASES = (("red team", "trust"), ("upgrade agent", "radar"), ("blueprints", "bl
            ("chat", "chat"))
 _ALIAS = "|".join(re.escape(alias) for alias, _ in ALIASES)
 _ALIAS_RE = re.compile(rf"\b({_ALIAS})\b", re.I)
-_A = rf"(?:the )?(?:{_ALIAS})(?: project| app)?"
-_OVERVIEW = re.compile(
-    rf"^(?:how (?:is|was|does) {_A}(?: built| made| designed| work| works)?"
-    rf"|tell me about {_A}|what(?:'s| is) {_A}|(?:explain|describe) {_A}|{_A}(?: overview)?)$")
-_SECTION_WORDS = {"intro": ("intro", "introduction", "overview"), "architecture": ("architecture",),
-                  "strengths": ("strengths", "strength", "strong points"), "intelligence": ("intelligence",)}
-
-
 @dataclass(frozen=True)
 class Section:
     short: str
@@ -83,23 +75,20 @@ def find_project(message: str, current: str | None) -> str | None:
     return current if current in PROJECTS else None
 
 
-def _clean(message: str) -> str:
-    return re.sub(r"\s+", " ", message.lower()).strip().rstrip("?.! ")
+def facts(project: str, briefs: dict) -> str:
+    """The whole brief in its detailed form: what the model may say about the project, and nothing else."""
+    return "\n\n".join(f"## {HEADINGS[name]}\n\n{briefs[project].sections[name].detail}" for name in SECTIONS)
 
 
-def prepared(message: str, project: str | None, briefs: dict) -> str | None:
-    """The full brief for an overview question, one section's short form when a short question names it, else None."""
-    named = find_project(message, None)
-    if named is None:
-        return None
-    text = _clean(message)
-    if _OVERVIEW.match(text):
-        return briefs[named].full()
-    if len(text.split()) <= 7:
-        for name, words in _SECTION_WORDS.items():
-            if any(re.search(rf"\b{re.escape(word)}\b", text) for word in words):
-                return briefs[named].section(name, detail=False)
-    return None
+_NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+_LIST_MARKER = re.compile(r"(?m)^\s*\d+\.\s")
+
+
+def invented_numbers(reply: str, source: str) -> list:
+    """Numbers in the reply that the source does not hold (ordered-list markers are not facts)."""
+    known = {n.rstrip(",.") for n in _NUMBER.findall(source)}
+    found = [n.rstrip(",.") for n in _NUMBER.findall(_LIST_MARKER.sub("", reply))]
+    return sorted({n for n in found if n not in known}, key=found.index)
 
 
 _COMMON = frozenset("""what when where which while does have with this that from your about there their they them then

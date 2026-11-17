@@ -195,3 +195,11 @@ def test_typing_indicator_replaces_the_thinking_text():
 
 def test_an_empty_answer_never_leaves_a_blank():
     assert "No answer came back" in JS and "errorShown" in JS
+
+
+def test_project_answers_offer_the_checked_brief():
+    assert "Show the checked brief" in JS and "brief: true" in JS and "done.grounded" in JS
+
+
+def test_the_wait_is_explained_while_the_model_reads():
+    assert "can take up to a minute" in JS

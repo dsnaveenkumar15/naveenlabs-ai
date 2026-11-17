@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from briefs import CONTEXT_CHARS, banned_in, best_section, relevance, PROJECTS, find_project, load_briefs, prepared
+from briefs import CONTEXT_CHARS, banned_in, best_section, facts, invented_numbers, relevance, PROJECTS, find_project, load_briefs
 
 HEADINGS = {"intro": "Intro", "architecture": "Architecture", "strengths": "Strengths", "intelligence": "Intelligence"}
 
@@ -84,17 +84,18 @@ def test_follow_up_without_a_name_uses_the_current_project():
     assert find_project("and how is Web3 tested?", "radar") == "web3"
 
 
-@pytest.mark.parametrize("message", ["How is Trust built?", "Tell me about Trust", "What is Trust?", "Explain Trust",
-                                     "describe trust", "tell me about the Trust project"])
-def test_overview_questions_get_the_full_brief(message, briefs):
-    assert prepared(message, "trust", briefs) == briefs["trust"].full()
+def test_facts_hold_every_section_in_detail(briefs):
+    text = facts("trust", briefs)
+    for name in ("Intro", "Architecture", "Strengths", "Intelligence"):
+        assert f"## {name}\n\n{name} detail." in text
+    assert "short." not in text
 
 
-def test_naming_a_section_gets_that_section(briefs):
-    assert prepared("Trust architecture", "trust", briefs) == briefs["trust"].section("architecture", detail=False)
-    assert prepared("What are the strengths of Radar?", "radar", briefs) == briefs["radar"].section("strengths", detail=False)
-    assert prepared("How does Trust use AI?", "trust", briefs) is None    # a detail question, for the model
-    assert prepared("What is photosynthesis?", None, briefs) is None
+def test_invented_numbers_finds_numbers_the_facts_do_not_hold():
+    source = "It stopped 0 of 178 (0%) attacks. 700 tries cost $0.0919. Runs every 6 hours; 1,826 tests."
+    assert invented_numbers("0 of 178 (0%) got through, for $0.0919, every 6 hours, 1,826 tests", source) == []
+    assert invented_numbers("0 of 180 got through in 7 hours", source) == ["180", "7"]
+    assert invented_numbers("1. First step\n2. Second step\n- 3 workers", source) == ["3"]   # list markers are not facts
 
 
 def test_best_section_prefers_the_matching_section(briefs_long):

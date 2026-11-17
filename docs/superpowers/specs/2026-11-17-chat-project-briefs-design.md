@@ -124,6 +124,14 @@ The live check showed gemma3:4b getting project facts wrong even with the releva
 brief section that matches it best, in detail, with no model; the model answers only general questions. A question
 that names no project and shares no meaningful word with the last brief shown is a general question.
 
+## Amendment 2, 2026-11-17 (owner: "use the model for all the replies, slower is fine, make the answers correct")
+
+Replaces amendment 1. Every reply is written by the model. A project question gets that project's whole brief in
+detailed form, strict faithfulness rules and temperature 0 (a spike on the server showed this faithful where part of
+the brief was not). Code checks every number in a finished project answer against the brief; a number it does not
+hold replaces the answer with the checked brief section. Each project answer offers "Show the checked brief". The
+first words come after about 15 to 20 s.
+
 ## Decided by the owner
 
 - Detailed answers about all six projects, including TradFi and Web3.

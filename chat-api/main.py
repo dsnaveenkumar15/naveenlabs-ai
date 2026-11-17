@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from briefs import NAMES, best_section, find_project, load_briefs, prepared, relevance
+from briefs import HEADINGS, NAMES, best_section, facts, find_project, invented_numbers, load_briefs, relevance
 
 MODEL = os.environ.get("CHAT_MODEL", "gemma3:4b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434/api/chat")
@@ -58,9 +58,7 @@ _BLOCKED = re.compile(r"""(?ix)
   | \b(porn|nsfw|explicit\s+sex)\w*
 """)
 
-# Kept short: the server reads a prompt at roughly 50-85 tokens a second, so every line here delays the first word.
-# The project facts live in briefs/ (one checked brief per project); a project question gets only that brief's
-# relevant sections. Keep the one-line list in step with the Work list on naveenlabs.tech.
+# For general questions. Keep the one-line project list in step with the Work list on naveenlabs.tech.
 BASE_PROMPT = (
     "You are the chat assistant on naveenlabs.tech, a small AI model running locally on this personal site. Be clear "
     "and friendly. Refuse anything harmful, illegal, sexual, hateful or dangerous, and scams, spam or messages "
@@ -73,6 +71,17 @@ BASE_PROMPT = (
     "facts given; if they do not cover it, say you don't know and name the project's page. For every other topic, "
     "answer from your own knowledge and never send people to naveenlabs.tech."
 )
+# For project questions: the whole brief, strict rules and temperature 0. A spike on the server (2026-11-17) showed
+# gemma3:4b faithful with the whole brief and these rules, and mixing facts up with only part of it.
+PROJECT_PROMPT = (
+    "You answer questions about {name}, a software project, for engineers and recruiters. Use ONLY the facts below "
+    "and stay faithful to their meaning. Rules: (1) do not add any fact, number, name, feature, opinion or conclusion "
+    "that is not written below; (2) when the facts give a result or a number that answers the question, include it "
+    "with the words around it, for example '0 of 178 (0%) attacks got through'; (3) do not say what is planned or "
+    "missing unless the facts say so; (4) if the facts do not answer the question, say so in one sentence; (5) do not "
+    "end with a question. Answer with a short heading and bullets.\n\nFACTS ABOUT {name}:\n{facts}"
+)
+REPLACED = ("The model's answer used a number that is not in the checked brief, so here is the brief itself.\n\n")
 BRIEFS = load_briefs(Path(__file__).parent / "briefs")
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -106,8 +115,9 @@ _daily: dict[str, int] = {}        # "YYYY-MM-DD|ip" and "YYYY-MM-DD|*" -> count
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_MESSAGE_LEN)
     project: Literal["trust", "radar", "blueprints", "tradfi", "web3", "chat"] | None = None   # the page's current project
-    section: Literal["intro", "architecture", "strengths", "intelligence"] | None = None
+    section: Literal["intro", "architecture", "strengths", "intelligence"] | None = None   # a "More on..." button
     detail: bool = False
+    brief: bool = False                                  # "Show the checked brief": the brief itself, no model
 
 
 def _client_ip(request: Request) -> str:
@@ -170,25 +180,23 @@ def chat(req: ChatRequest, request: Request):
     if project and req.section is None and find_project(req.message, None) is None \
             and relevance(project, req.message, BRIEFS) == 0:
         project = None
-    if req.section and project:
-        return _answer(BRIEFS[project].section(req.section, req.detail), "brief", project)
-    ready = prepared(req.message, project, BRIEFS)
-    if ready is not None:
-        return _answer(ready, "brief", find_project(req.message, None))
-    if project:
-        # Any other question about a project gets the prepared section that matches it best, in detail: the small
-        # model got project facts wrong even with the brief in its prompt (live check, 2026-11-17).
-        section = best_section(project, req.message, BRIEFS)
-        return _answer(f"# {NAMES[project]}\n\n" + BRIEFS[project].section(section, detail=True), "brief", project)
+    if req.brief and project:
+        return _answer(BRIEFS[project].full(), "brief", project)
 
     if not _slots.acquire(blocking=False):
         raise HTTPException(503, "Busy, try again in a few seconds.", headers={"Retry-After": "5"})
-    system = BASE_PROMPT
+    options = {"num_predict": MAX_REPLY_TOKENS, "num_thread": MODEL_THREADS}
+    if project:
+        system = PROJECT_PROMPT.format(name=NAMES[project], facts=facts(project, BRIEFS))
+        options["temperature"] = 0
+        question = (f"Explain the {req.section} of {NAMES[project]} in detail." if req.section else req.message)
+    else:
+        system, question = BASE_PROMPT, req.message
     payload = {
         "model": MODEL,
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": req.message}],
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": question}],
         "stream": True,
-        "options": {"num_predict": MAX_REPLY_TOKENS, "num_thread": MODEL_THREADS},
+        "options": options,
     }
     http_req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode(),
                                       headers={"Content-Type": "application/json"})
@@ -197,12 +205,15 @@ def chat(req: ChatRequest, request: Request):
     except Exception as exc:
         _slots.release()
         raise HTTPException(503, "Model unavailable, try again shortly.") from exc
-    return StreamingResponse(_relay(upstream, project), media_type="application/x-ndjson")
+    check = (project, req.section or best_section(project, question, BRIEFS)) if project else None
+    return StreamingResponse(_relay(upstream, project, check), media_type="application/x-ndjson")
 
 
-def _relay(upstream, project: str | None):
-    """Pass the model's chunks on as they come, screening the text so far; the slot is freed however it ends."""
-    text = ""
+def _relay(upstream, project: str | None, check: tuple | None = None):
+    """Pass the model's chunks on as they come, screening the text so far; the slot is freed however it ends. For a
+    project answer, code then checks every number against the brief; one the brief does not hold replaces the answer
+    with the checked section (models explain, code decides)."""
+    text, failed = "", False
     try:
         with upstream:
             for raw in upstream:
@@ -216,15 +227,20 @@ def _relay(upstream, project: str | None):
                     text += chunk
                     if _BLOCKED.search(text):
                         yield _line({"replace": REFUSAL})
+                        failed = True
                         break
                     yield _line({"text": chunk})
                 if data.get("done"):
                     break
     except Exception:
+        failed = True
         yield _line({"error": "The model stopped answering. Try again in a minute."})
     finally:
         _slots.release()
-    yield _line({"done": True, "kind": "model", "project": project})
+    if check and not failed and invented_numbers(text, facts(project, BRIEFS)):
+        name, section = check
+        yield _line({"replace": REPLACED + f"# {NAMES[name]}\n\n" + BRIEFS[name].section(section, detail=True)})
+    yield _line({"done": True, "kind": "model", "project": project, "grounded": bool(project)})
 
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
