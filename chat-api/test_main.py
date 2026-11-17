@@ -265,3 +265,17 @@ def test_an_ollama_error_line_mid_stream_reaches_the_visitor(monkeypatch):
     out = lines(post({"message": "hello"}))
     assert out[0] == {"text": "par"} and "error" in out[1] and out[-1]["done"] is True
     assert main._slots.acquire(blocking=False)
+
+
+def test_the_image_ships_every_local_module_and_the_briefs():
+    # 2026-11-17: the first deploy crashed with "No module named 'briefs'": the Dockerfile copied only main.py.
+    from pathlib import Path
+    here = Path(__file__).parent
+    copied = " ".join(line for line in (here / "Dockerfile").read_text(encoding="utf-8").splitlines()
+                      if line.startswith("COPY"))
+    local = {p.stem for p in here.glob("*.py") if not p.name.startswith("test_")}
+    imported = {name for name in local if f"import {name}" in (here / "main.py").read_text(encoding="utf-8")
+                or f"from {name} import" in (here / "main.py").read_text(encoding="utf-8")}
+    for name in imported | {"main"}:
+        assert f"{name}.py" in copied, name
+    assert "COPY briefs ./briefs" in copied and "COPY static ./static" in copied
