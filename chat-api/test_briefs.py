@@ -1,9 +1,10 @@
 # test_briefs.py - the project briefs: loading, routing a question, and the model's context.
 import re
+from pathlib import Path
 
 import pytest
 
-from briefs import CONTEXT_CHARS, PROJECTS, find_project, load_briefs, model_context, prepared
+from briefs import CONTEXT_CHARS, banned_in, PROJECTS, find_project, load_briefs, model_context, prepared
 
 HEADINGS = {"intro": "Intro", "architecture": "Architecture", "strengths": "Strengths", "intelligence": "Intelligence"}
 
@@ -104,3 +105,33 @@ def test_model_context_fits_the_budget_and_prefers_matching_sections(briefs_long
 def test_model_context_always_has_something(briefs_long):
     ctx = model_context("radar", "zzz", briefs_long)
     assert ctx.startswith("Radar:") and "## Intro" in ctx and len(ctx) <= CONTEXT_CHARS
+
+
+REAL = Path(__file__).parent / "briefs"
+
+
+def test_every_project_has_a_complete_brief():
+    assert set(load_briefs(REAL)) == set(PROJECTS)
+
+
+def test_briefs_never_name_brands_hosts_or_private_tools():
+    for path in REAL.glob("*.md"):
+        assert banned_in(path.read_text(encoding="utf-8")) == [], path.name
+
+
+def test_banned_check_matches_whole_words():
+    assert banned_in("Naveenkumar built it") == []
+    assert banned_in("uses Kuma and n8n") == ["kuma", "n8n"]
+    assert banned_in("port :9200 and 187.126.1.1") == ["187.126.", ":9200"]
+
+
+def test_short_forms_fit_the_model_context():
+    for brief in load_briefs(REAL).values():
+        for name, section in brief.sections.items():
+            assert len(section.short) <= CONTEXT_CHARS // 2, (brief.project, name, len(section.short))
+
+
+def test_finance_briefs_say_paper_mode():
+    briefs = load_briefs(REAL)
+    for project in ("tradfi", "web3"):
+        assert "paper" in briefs[project].full().lower(), project

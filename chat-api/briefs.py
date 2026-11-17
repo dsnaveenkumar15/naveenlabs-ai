@@ -14,6 +14,14 @@ MORE = "<!-- more -->"
 BANNED = ("zerodha", "kite", "binance", "n8n", "flowise", "portainer", "kuma", "tailscale", "187.126.",
           "/internal/control", ":9100", ":9200", ":9300", "investment advice")
 
+_BANNED_RE = re.compile("|".join(rf"\b{re.escape(w)}\b" if w.isalnum() else re.escape(w) for w in BANNED), re.I)
+
+
+def banned_in(text: str) -> list:
+    """Banned words found in the text: plain words match whole words only ("kuma" is not in "Naveenkumar")."""
+    return sorted({match.group(0).lower() for match in _BANNED_RE.finditer(text)})
+
+
 # Longer aliases first so "red team" wins over nothing and "blueprints" over "blueprint".
 ALIASES = (("red team", "trust"), ("upgrade agent", "radar"), ("blueprints", "blueprints"), ("blueprint", "blueprints"),
            ("architect", "blueprints"), ("trust", "trust"), ("radar", "radar"), ("tradfi", "tradfi"), ("web3", "web3"),
