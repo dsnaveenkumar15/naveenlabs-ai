@@ -1,0 +1,106 @@
+# test_briefs.py - the project briefs: loading, routing a question, and the model's context.
+import re
+
+import pytest
+
+from briefs import CONTEXT_CHARS, PROJECTS, find_project, load_briefs, model_context, prepared
+
+HEADINGS = {"intro": "Intro", "architecture": "Architecture", "strengths": "Strengths", "intelligence": "Intelligence"}
+
+
+def write_brief(directory, project, body=None):
+    body = body or {name: (f"{name.capitalize()} short.", f"{name.capitalize()} detail.") for name in HEADINGS}
+    text = "".join(f"## {HEADINGS[name]}\n\n{short}\n\n<!-- more -->\n\n{detail}\n\n" for name, (short, detail) in body.items())
+    (directory / f"{project}.md").write_text(text, encoding="utf-8")
+
+
+@pytest.fixture
+def briefs(tmp_path):
+    for project in PROJECTS:
+        write_brief(tmp_path, project)
+    return load_briefs(tmp_path)
+
+
+@pytest.fixture
+def briefs_long(tmp_path):
+    words = "lorem ipsum dolor sit amet " * 60
+    for project in PROJECTS:
+        write_brief(tmp_path, project, {
+            "intro": ("A checker for agent tools.", words),
+            "architecture": ("Web app, rules engine, sandbox.", words),
+            "strengths": ("Tested, cheap, fast.", words),
+            "intelligence": ("A small model scores the attacks; the guard is code.", "The model scores the attacks. " + words),
+        })
+    return load_briefs(tmp_path)
+
+
+def test_load_reads_four_sections_with_both_forms(briefs):
+    section = briefs["trust"].sections["architecture"]
+    assert section.short == "Architecture short." and section.detail == "Architecture detail."
+    assert list(briefs["trust"].sections) == list(HEADINGS)
+
+
+def test_missing_section_names_the_file(tmp_path):
+    for project in PROJECTS:
+        write_brief(tmp_path, project)
+    (tmp_path / "trust.md").write_text("## Intro\n\nOnly this.\n\n<!-- more -->\n\nMore.\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="trust.md"):
+        load_briefs(tmp_path)
+
+
+def test_missing_detail_form_names_the_file(tmp_path):
+    for project in PROJECTS:
+        write_brief(tmp_path, project)
+    text = (tmp_path / "radar.md").read_text(encoding="utf-8").replace("<!-- more -->", "", 1)
+    (tmp_path / "radar.md").write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match="radar.md"):
+        load_briefs(tmp_path)
+
+
+def test_full_brief_has_title_and_headings_in_order(briefs):
+    text = briefs["trust"].full()
+    assert text.startswith("# Trust")
+    assert re.findall(r"^## (\w+)", text, re.M) == ["Intro", "Architecture", "Strengths", "Intelligence"]
+    assert "Architecture detail." not in text
+
+
+def test_section_gives_the_short_or_the_detailed_form(briefs):
+    assert briefs["web3"].section("strengths", detail=False) == "## Strengths\n\nStrengths short."
+    assert briefs["web3"].section("strengths", detail=True) == "## Strengths\n\nStrengths detail."
+
+
+@pytest.mark.parametrize("message,expected", [
+    ("How is Trust built?", "trust"), ("tell me about the red team", "trust"), ("What does the Architect do?", "blueprints"),
+    ("explain TradFi", "tradfi"), ("WEB3 architecture", "web3"), ("How does the upgrade agent work?", "radar"),
+    ("What is a trustworthy source?", None), ("What can you do?", None)])
+def test_find_project_by_name_or_alias(message, expected):
+    assert find_project(message, None) == expected
+
+
+def test_follow_up_without_a_name_uses_the_current_project():
+    assert find_project("how is it tested?", "radar") == "radar"
+    assert find_project("how is it tested?", "nonsense") is None
+    assert find_project("and how is Web3 tested?", "radar") == "web3"
+
+
+@pytest.mark.parametrize("message", ["How is Trust built?", "Tell me about Trust", "What is Trust?", "Explain Trust",
+                                     "describe trust", "tell me about the Trust project"])
+def test_overview_questions_get_the_full_brief(message, briefs):
+    assert prepared(message, "trust", briefs) == briefs["trust"].full()
+
+
+def test_naming_a_section_gets_that_section(briefs):
+    assert prepared("Trust architecture", "trust", briefs) == briefs["trust"].section("architecture", detail=False)
+    assert prepared("What are the strengths of Radar?", "radar", briefs) == briefs["radar"].section("strengths", detail=False)
+    assert prepared("How does Trust use AI?", "trust", briefs) is None    # a detail question, for the model
+    assert prepared("What is photosynthesis?", None, briefs) is None
+
+
+def test_model_context_fits_the_budget_and_prefers_matching_sections(briefs_long):
+    ctx = model_context("trust", "which model scores the attacks?", briefs_long)
+    assert ctx.startswith("Trust:") and len(ctx) <= CONTEXT_CHARS and "## Intelligence" in ctx
+
+
+def test_model_context_always_has_something(briefs_long):
+    ctx = model_context("radar", "zzz", briefs_long)
+    assert ctx.startswith("Radar:") and "## Intro" in ctx and len(ctx) <= CONTEXT_CHARS
