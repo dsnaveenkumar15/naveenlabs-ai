@@ -36,7 +36,7 @@ a { color: var(--ink); }
 .skip:focus { position: fixed; left: 12px; top: 12px; z-index: 20; width: auto; height: auto; clip: auto; padding: 8px 14px; background: var(--surface); border-radius: 999px; box-shadow: var(--shadow-2); }
 
 /* One centred column: greeting, a pill composer that stays at the top, six project cards (they fold away once a
-   chat starts), then the conversation. */
+   chat starts), then the conversation; a started chat reorders it (see .chatting below). */
 .chat-shell { flex: 1; display: flex; flex-direction: column; gap: 22px; padding-top: clamp(36px, 6vw, 72px); padding-bottom: 20px; }
 .greeting h1 { font-size: clamp(32px, 5vw, 46px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.08; margin: 0 0 12px; }
 .greeting p { color: var(--ink-2); font-size: 18px; margin: 0; max-width: 54ch; }
@@ -86,6 +86,15 @@ a { color: var(--ink); }
 .foot-note { color: var(--ink-2); }
 .foot-by a { font-weight: 600; }
 .disclaimer { font-size: 12.5px; }
+
+/* Once a chat starts: history on top, the composer pinned to the bottom of the screen, cards folded above. */
+.chatting .greeting { display: none; }
+.chatting .show-projects { order: 1; }
+.chatting .projects { order: 2; }
+.chatting .conversation { order: 3; }
+.chatting .composer { order: 4; top: auto; bottom: 16px; }
+.chatting .chat-note { order: 5; }
+.chatting .conversation > * { scroll-margin-bottom: 110px; }
 
 @media (max-width: 900px) { .projects { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .family { display: none; } .projects { grid-template-columns: 1fr; } .msg, .msg-rich { max-width: 96%; } }

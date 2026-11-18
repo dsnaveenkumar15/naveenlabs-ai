@@ -116,6 +116,7 @@ function addFollowUps(project, withMore) {
 }
 
 function foldProjects() {
+  document.querySelector(".chat-shell").classList.add("chatting");
   if (!starters || starters.hidden) return;
   starters.hidden = true;
   showProjects.hidden = false;
@@ -157,6 +158,7 @@ async function ask(body, from) {
     if (pending) { pending.remove(); pending = null; }
     if (!bubble) bubble = addAnswer();
     bubble.replaceChildren(render(text));
+    bubble.scrollIntoView({ block: "nearest" });
   };
 
   try {

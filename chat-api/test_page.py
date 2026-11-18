@@ -215,3 +215,14 @@ def test_buttons_are_disabled_while_an_answer_is_coming():
 
 def test_only_typed_questions_return_focus_to_the_input():
     assert "if (!from) input.focus()" in JS and "preventScroll: true" in JS
+
+
+def test_once_a_chat_starts_history_is_on_top_and_the_composer_below():
+    assert 'classList.add("chatting")' in JS
+    assert "display: none" in rule(".chatting .greeting")
+    assert "order:" in rule(".chatting .conversation") and "order:" in rule(".chatting .composer")
+    order = lambda sel: int(re.search(r"order:\s*(\d+)", rule(sel)).group(1))
+    assert order(".chatting .conversation") < order(".chatting .composer")
+    assert "bottom:" in rule(".chatting .composer") and "top: auto" in rule(".chatting .composer")
+    assert "scroll-margin-bottom" in rule(".chatting .conversation > *")   # new messages never hide under the box
+    assert 'bubble.scrollIntoView({ block: "nearest" })' in JS                  # and a growing answer stays above it
