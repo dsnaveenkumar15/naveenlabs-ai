@@ -28,11 +28,12 @@ class FakeStream:
         yield (json.dumps({"message": {"content": ""}, "done": True}) + "\n").encode()
 
 
-def reset(monkeypatch, trust_proxy=False, slots=2, chunks=("hi",)):
+def reset(monkeypatch, trust_proxy=False, slots=2, chunks=("hi",), guard=lambda messages: None):
     main._hits.clear()
     main._daily.clear()
     monkeypatch.setattr(main, "TRUST_PROXY", trust_proxy)
     monkeypatch.setattr(main, "_slots", main.threading.BoundedSemaphore(slots))
+    monkeypatch.setattr(main, "_guard", guard)         # Llama Guard: safe unless a test says otherwise
     seen = []
 
     def fake_urlopen(req, timeout=0):
@@ -303,3 +304,57 @@ def test_the_model_gets_time_to_read_a_whole_brief(monkeypatch):
     monkeypatch.setattr(main.urllib.request, "urlopen", lambda req, timeout=0: timeouts.append(timeout) or FakeStream(["x"]))
     post({"message": "How is Trust built?", "project": "trust"})
     assert timeouts == [180]
+
+
+# --- Llama Guard 3 ---
+
+def test_guard_refuses_an_unsafe_question_before_the_model_runs(monkeypatch):
+    seen = reset(monkeypatch, guard=lambda messages: ["S2"] if messages[-1]["role"] == "user" else None)
+    r = post({"message": "an innocent-looking but unsafe ask"})
+    assert lines(r)[0]["text"] == main.REFUSAL and lines(r)[-1]["kind"] == "notice"
+    assert seen == []                                  # the chat model was never called
+
+
+def test_guard_self_harm_category_gets_the_support_line(monkeypatch):
+    reset(monkeypatch, guard=lambda messages: ["S11"])
+    assert lines(post({"message": "something the keyword screen misses"}))[0]["text"] == main.SUPPORT
+
+
+def test_guard_replaces_an_unsafe_answer(monkeypatch):
+    calls = []
+
+    def guard(messages):
+        calls.append(messages)
+        return ["S1"] if messages[-1]["role"] == "assistant" else None
+    reset(monkeypatch, chunks=("an answer the guard dislikes",), guard=guard)
+    out = lines(post({"message": "hello"}))
+    assert {"replace": main.REFUSAL} in out
+    assert calls[-1] == [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "an answer the guard dislikes"}]
+
+
+class FakeReply:
+    def __init__(self, content):
+        self.body = json.dumps({"message": {"content": content}}).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self.body
+
+
+def test_guard_parses_llama_guard_verdicts_and_fails_open(monkeypatch):
+    monkeypatch.setattr(main, "GUARD_MODEL", "llama-guard3:1b")
+    for content, expected in [("safe", None), ("unsafe\nS1", ["S1"]), ("unsafe\nS2,S11", ["S2", "S11"]), ("unsafe", ["UNSAFE"])]:
+        monkeypatch.setattr(main.urllib.request, "urlopen", lambda req, timeout=0, c=content: FakeReply(c))
+        assert main._guard([{"role": "user", "content": "x"}]) == expected
+
+    def down(req, timeout=0):
+        raise OSError("ollama unreachable")
+    monkeypatch.setattr(main.urllib.request, "urlopen", down)
+    assert main._guard([{"role": "user", "content": "x"}]) is None      # fails open: the keyword screen still applies
+    monkeypatch.setattr(main, "GUARD_MODEL", "")
+    assert main._guard([{"role": "user", "content": "x"}]) is None      # disabled

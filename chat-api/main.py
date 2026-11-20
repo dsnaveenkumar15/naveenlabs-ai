@@ -46,8 +46,12 @@ REFUSAL = "I can't help with that. I'm a small demo model for friendly, everyday
 SUPPORT = ("I'm sorry you're going through this. Please talk to someone now: in India call Tele-MANAS "
            "on 14416 (free, 24x7), or your local emergency number. You don't have to face this alone.")
 _SELF_HARM = re.compile(r"(?i)\b(kill|hurt|harm)\s+(myself|me)\b|\bsuicid|\bself.?harm\b|\bend\s+my\s+life\b")
-# Topics this public demo refuses outright, checked on the question and on the reply.
-# ponytail: keyword screen, not a classifier; a small local model can't run a safety model alongside it.
+# Llama Guard 3 classifies the question before the model runs and the whole exchange after it answers. Empty disables it.
+GUARD_MODEL = os.environ.get("CHAT_GUARD_MODEL", "llama-guard3:1b")
+GUARD_TIMEOUT = 30
+SELF_HARM_CATEGORY = "S11"         # Llama Guard 3's self-harm category gets the support line, not a refusal
+# Topics this public demo refuses outright, checked on the question and on the reply: the fast first layer, in front of
+# Llama Guard, and the only layer left if the guard model is down.
 _BLOCKED = re.compile(r"""(?ix)
     \b(pipe|nail|car|fertili[sz]er|homemade|make\s+a|build\s+a)\s*bombs?\b | \bexplosives?\b | \bdetonat
   | \b(make|build|3d.?print)\w*\s+(a\s+)?(gun|firearm|silencer)\b | \bnerve\s+agent | \bsarin\b | \bricin\b | \banthrax\b
@@ -155,6 +159,28 @@ def _line(obj) -> str:
     return json.dumps(obj) + "\n"
 
 
+def _guard(messages: list[dict]) -> list[str] | None:
+    """Llama Guard 3's verdict on a conversation: None when safe, else the violated categories (e.g. ["S11"])."""
+    if not GUARD_MODEL:
+        return None
+    payload = {"model": GUARD_MODEL, "messages": messages, "stream": False,
+               "options": {"temperature": 0, "num_predict": 12, "num_thread": MODEL_THREADS}}
+    req = urllib.request.Request(OLLAMA_URL, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=GUARD_TIMEOUT) as resp:
+            verdict = json.loads(resp.read())["message"]["content"].strip().lower()
+    except Exception:
+        # ponytail: fails open -- the keyword screen still runs; fail closed if abuse ever gets past both
+        return None
+    if not verdict.startswith("unsafe"):
+        return None
+    return [c.upper() for c in re.findall(r"s\d+", verdict)] or ["UNSAFE"]
+
+
+def _verdict_reply(categories: list[str]) -> str:
+    return SUPPORT if SELF_HARM_CATEGORY in categories else REFUSAL
+
+
 def _answer(text: str, kind: str, project: str | None) -> Response:
     """A whole answer in the stream format: one text line, then the done line."""
     body = _line({"text": text}) + _line({"done": True, "kind": kind, "project": project})
@@ -176,6 +202,9 @@ def chat(req: ChatRequest, request: Request):
     project = route(req.message, req.project, req.section, BRIEFS)
     if req.brief and project:
         return _answer(BRIEFS[project].full(), "brief", project)
+    flagged = _guard([{"role": "user", "content": req.message}])
+    if flagged:
+        return _answer(_verdict_reply(flagged), "notice", None)
 
     if not _slots.acquire(blocking=False):
         raise HTTPException(503, "Busy, try again in a few seconds.", headers={"Retry-After": "5"})
@@ -200,13 +229,14 @@ def chat(req: ChatRequest, request: Request):
         _slots.release()
         raise HTTPException(503, "Model unavailable, try again shortly.") from exc
     check = (project, req.section or best_section(project, question, BRIEFS)) if project else None
-    return StreamingResponse(_relay(upstream, project, check), media_type="application/x-ndjson")
+    return StreamingResponse(_relay(upstream, project, check, req.message), media_type="application/x-ndjson")
 
 
-def _relay(upstream, project: str | None, check: tuple | None = None):
-    """Pass the model's chunks on as they come, screening the text so far; the slot is freed however it ends. For a
-    project answer, code then checks every number against the brief; one the brief does not hold replaces the answer
-    with the checked section (models explain, code decides)."""
+def _relay(upstream, project: str | None, check: tuple | None = None, question: str = ""):
+    """Pass the model's chunks on as they come, screening the text so far; the slot is freed however it ends. Llama
+    Guard then judges the whole exchange, and an unsafe one replaces the answer. For a project answer, code checks every
+    number against the brief; one the brief does not hold replaces the answer with the checked section (models
+    explain, code decides)."""
     text, failed = "", False
     try:
         with upstream:
@@ -231,6 +261,11 @@ def _relay(upstream, project: str | None, check: tuple | None = None):
         yield _line({"error": "The model stopped answering. Try again in a minute."})
     finally:
         _slots.release()
+    if not failed and text:
+        flagged = _guard([{"role": "user", "content": question}, {"role": "assistant", "content": text}])
+        if flagged:
+            yield _line({"replace": _verdict_reply(flagged)})
+            failed = True
     if check and not failed and invented_numbers(text, facts(project, BRIEFS)):
         name, section = check
         yield _line({"replace": REPLACED + f"# {NAMES[name]}\n\n" + BRIEFS[name].section(section, detail=True)})

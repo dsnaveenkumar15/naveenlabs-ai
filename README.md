@@ -30,10 +30,13 @@ Ollama's API has no authentication and no limits. `chat-api/main.py` is the only
 - **Limits:** 10 requests per minute per visitor, 50 per visitor per day, 1,000 per day for the whole site
   (`CHAT_DAILY_PER_VISITOR`, `CHAT_DAILY_TOTAL`), at most 2 generations at once (`CHAT_MAX_CONCURRENT`, others get
   503 with `Retry-After`), replies capped at 600 tokens and streamed, questions at 1,000 characters.
-- **Guardrails:** a topic screen on the question and on the reply (weapons, malware, phishing and scams, drugs,
-  sexual content); self-harm questions get a supportive reply with the Tele-MANAS helpline (14416); a system prompt
-  that refuses harmful requests, gives no medical, legal or financial advice and never claims to speak for a company.
-  The screen is a keyword list, not a classifier; the system prompt is the second layer.
+- **Guardrails, three layers:** (1) a fast keyword screen on the question and on the streamed reply (weapons,
+  malware, phishing and scams, drugs, sexual content); (2) **Llama Guard 3 (1B)** on Ollama classifies the question
+  before the chat model runs and the whole exchange after it answers: an unsafe question is refused, an unsafe answer
+  is replaced, and the self-harm category (S11) gets a supportive reply with the Tele-MANAS helpline (14416);
+  (3) a system prompt that refuses harmful requests, gives no medical, legal or financial advice and never claims to
+  speak for a company. A warm guard check takes about 0.5 s on the CPU-only server. If the guard model is down, the
+  check fails open and the keyword screen still applies. `CHAT_GUARD_MODEL=` (empty) turns the guard off.
 - **Security headers** on every response: strict CSP, HSTS, `nosniff`, `frame-ancestors 'none'`, permissions policy.
   API docs are turned off.
 - **Visitor identity behind the proxy:** the rightmost `X-Forwarded-For` entry (`TRUST_PROXY=1`).
@@ -138,3 +141,4 @@ uses the same Ollama for embeddings (`nomic-embed-text`).
 | 2026-10-08 | Facts no longer describe the private trading systems (a test forbids it) |
 | 2026-10-11 | Pushed to a private GitHub repository |
 | 2026-11-12 | Engineering explainer deck (`docs/explainer.html`): 13 slides in Chat's own look, with 3D views of a question's path through the gates, exposure as terraces, the model benchmark and the shared CPU and memory budget; three live questions quoted with their measured times |
+| 2026-11-20 | Llama Guard 3 (1B) guardrail on the question and the full exchange (unsafe refused or replaced, S11 gets the helpline reply, fails open to the keyword screen); Ollama memory cap 6 GB to 8 GB; repository public |
