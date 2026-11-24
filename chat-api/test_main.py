@@ -358,3 +358,46 @@ def test_guard_parses_llama_guard_verdicts_and_fails_open(monkeypatch):
     assert main._guard([{"role": "user", "content": "x"}]) is None      # fails open: the keyword screen still applies
     monkeypatch.setattr(main, "GUARD_MODEL", "")
     assert main._guard([{"role": "user", "content": "x"}]) is None      # disabled
+
+
+def test_guard_checks_hold_a_slot_and_always_give_it_back(monkeypatch):
+    free = []
+
+    def guard(messages):                               # no slot may be free while a check runs (slots=1)
+        got = main._slots.acquire(blocking=False)
+        free.append(got)
+        if got:
+            main._slots.release()
+        return guard.verdict if messages[-1]["role"] == guard.on else None
+
+    for on, verdict in [("user", None), ("user", ["S2"]), ("assistant", ["S1"])]:
+        guard.on, guard.verdict = on, verdict
+        reset(monkeypatch, slots=1, guard=guard)
+        assert post({"message": "hello"}).status_code == 200
+        assert main._slots.acquire(blocking=False)     # released afterwards, whatever the verdict
+        main._slots.release()
+    assert free and not any(free)
+
+
+def test_a_busy_server_runs_no_guard_check(monkeypatch):
+    calls = []
+    reset(monkeypatch, slots=1, guard=lambda messages: calls.append(messages))
+    assert main._slots.acquire(blocking=False)
+    assert post({"message": "hello"}).status_code == 503 and calls == []
+    main._slots.release()
+
+
+def test_a_guard_that_cannot_judge_is_logged_without_the_message(monkeypatch, caplog):
+    monkeypatch.setattr(main, "GUARD_MODEL", "llama-guard3:1b")
+
+    def down(req, timeout=0):
+        raise OSError("ollama unreachable")
+    monkeypatch.setattr(main.urllib.request, "urlopen", down)
+    assert main._guard([{"role": "user", "content": "private words"}]) is None
+    monkeypatch.setattr(main.urllib.request, "urlopen", lambda req, timeout=0: FakeReply("maybe private words"))
+    assert main._guard([{"role": "user", "content": "private words"}]) is None
+    monkeypatch.setattr(main.urllib.request, "urlopen", lambda req, timeout=0: FakeReply("safe"))
+    assert main._guard([{"role": "user", "content": "private words"}]) is None
+    lines = [r.getMessage() for r in caplog.records]
+    assert len(lines) == 2 and "OSError" in lines[0] and "verdict" in lines[1]      # a safe verdict is not logged
+    assert not any("private" in line for line in lines)

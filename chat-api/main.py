@@ -8,6 +8,7 @@ personal site on a single container.
 # replicas -- fine for a single-instance personal site, revisit with Redis if
 # this ever needs to scale past one container.
 """
+import logging
 import os
 import re
 import threading
@@ -87,6 +88,7 @@ PROJECT_PROMPT = (
 REPLACED = ("The model's answer used a number that is not in the checked brief, so here is the brief itself.\n\n")
 BRIEFS = load_briefs(Path(__file__).parent / "briefs")
 
+log = logging.getLogger("chat")
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 SECURITY_HEADERS = {
@@ -169,10 +171,13 @@ def _guard(messages: list[dict]) -> list[str] | None:
     try:
         with urllib.request.urlopen(req, timeout=GUARD_TIMEOUT) as resp:
             verdict = json.loads(resp.read())["message"]["content"].strip().lower()
-    except Exception:
+    except Exception as exc:
         # ponytail: fails open -- the keyword screen still runs; fail closed if abuse ever gets past both
+        log.warning("guard unavailable, message passed on the keyword screen alone: %s", type(exc).__name__)
         return None
     if not verdict.startswith("unsafe"):
+        if not verdict.startswith("safe"):
+            log.warning("guard gave no usable verdict, message passed on the keyword screen alone")
         return None
     return [c.upper() for c in re.findall(r"s\d+", verdict)] or ["UNSAFE"]
 
@@ -202,12 +207,13 @@ def chat(req: ChatRequest, request: Request):
     project = route(req.message, req.project, req.section, BRIEFS)
     if req.brief and project:
         return _answer(BRIEFS[project].full(), "brief", project)
-    flagged = _guard([{"role": "user", "content": req.message}])
-    if flagged:
-        return _answer(_verdict_reply(flagged), "notice", None)
-
+    # One slot covers the whole request, guard checks included: they use the same CPU as a generation.
     if not _slots.acquire(blocking=False):
         raise HTTPException(503, "Busy, try again in a few seconds.", headers={"Retry-After": "5"})
+    flagged = _guard([{"role": "user", "content": req.message}])
+    if flagged:
+        _slots.release()
+        return _answer(_verdict_reply(flagged), "notice", None)
     options = {"num_predict": MAX_REPLY_TOKENS, "num_thread": MODEL_THREADS}
     if project:
         system = PROJECT_PROMPT.format(name=NAMES[project], facts=facts(project, BRIEFS))
@@ -256,16 +262,16 @@ def _relay(upstream, project: str | None, check: tuple | None = None, question: 
                     yield _line({"text": chunk})
                 if data.get("done"):
                     break
+        if not failed and text:
+            flagged = _guard([{"role": "user", "content": question}, {"role": "assistant", "content": text}])
+            if flagged:
+                failed = True
+                yield _line({"replace": _verdict_reply(flagged)})
     except Exception:
         failed = True
         yield _line({"error": "The model stopped answering. Try again in a minute."})
     finally:
         _slots.release()
-    if not failed and text:
-        flagged = _guard([{"role": "user", "content": question}, {"role": "assistant", "content": text}])
-        if flagged:
-            yield _line({"replace": _verdict_reply(flagged)})
-            failed = True
     if check and not failed and invented_numbers(text, facts(project, BRIEFS)):
         name, section = check
         yield _line({"replace": REPLACED + f"# {NAMES[name]}\n\n" + BRIEFS[name].section(section, detail=True)})
